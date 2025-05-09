@@ -2,9 +2,12 @@
 # Devem alterar as classes e funções neste ficheiro de acordo com as instruções do enunciado.
 # Além das funções e classes sugeridas, podem acrescentar outras que considerem pertinentes.
 
-# Grupo 00:
-# 00000 Nome1
-# 00000 Nome2
+# Grupo 35:
+# 110632 Inês Costa
+# 109686 Miguel Raposo
+
+from sys import stdin, stdout
+from search import *
 
 class NuruominoState:
     state_id = 0
@@ -22,22 +25,10 @@ class NuruominoState:
 class Board:
     """Representação interna de um tabuleiro do Puzzle Nuruomino."""
 
-    def adjacent_regions(self, region:int) -> list:
-        """Devolve uma lista das regiões que fazem fronteira com a região enviada no argumento."""
-        #TODO
-        pass
-    
-    def adjacent_positions(self, row:int, col:int) -> list:
-        """Devolve as posições adjacentes à região, em todas as direções, incluindo diagonais."""
-        #TODO
-        pass
+    def __init__(self, board: list, regions:dict):
+        self.board = board
+        self.regions = regions
 
-    def adjacent_values(self, row:int, col:int) -> list:
-        """Devolve os valores das celulas adjacentes à região, em todas as direções, incluindo diagonais."""
-        #TODO
-        pass
-    
-    
     @staticmethod
     def parse_instance():
         """Lê o test do standard input (stdin) que é passado como argumento
@@ -49,10 +40,53 @@ class Board:
             > from sys import stdin
             > line = stdin.readline().split()
         """
-        #TODO
-        pass    
+        board = []
+        for line in stdin.read().split("\n"):
+            board.append(list(map(int, line.split("\t"))))
+        regions = {}
+        for row, line in enumerate(board):
+            for col, region_num in enumerate(line):
+                regions.setdefault(region_num, []).append((row, col))
+        return Board(board, regions)
 
-    # TODO: outros metodos da classe Board
+    def get_value(self, row:int, col:int) -> int:
+        """Devolve o valor da célula."""
+        return self.board[row][col]
+
+    def adjacent_positions(self, row:int, col:int) -> list:
+        """Devolve as posições adjacentes à região, em todas as direções, incluindo diagonais."""
+        adjacent_coordinates = [(-1,0), (-1,-1), (0,-1), (1,-1), (1,0), (1,1), (0,1), (-1,1)]
+        adjacent_positions = []
+        board_size = len(self.board)
+        for drow, dcolumn in adjacent_coordinates:
+            new_row, new_column = row + drow, col + dcolumn
+            if 0 <= new_row < board_size and 0 <= new_column < board_size:
+                adjacent_positions.append((new_row, new_column))
+        return adjacent_positions
+
+    def adjacent_values(self, row:int, col:int) -> list:
+        """Devolve os valores das celulas adjacentes à região,
+        em todas as direções, incluindo diagonais."""
+        adjacent_values = set()
+        for new_row, new_column in self.adjacent_positions(row, col):
+            adjacent_values.add(self.board[new_row][new_column])
+        return adjacent_values
+
+    def adjacent_regions(self, region:int) -> list:
+        """Devolve uma lista das regiões que fazem fronteira com a região enviada no argumento."""
+        adjacent_regions = set()
+        for row, col in self.regions[region]:
+            adjacent_regions.update(self.adjacent_values(row, col))
+        return list(adjacent_regions)
+
+    def print_instance(self):
+        """Imprime a representação do tabuleiro no formato de string."""
+        game_board = ""
+        for row in self.board:
+            for region in row:
+                game_board += f"{region}\t"
+            game_board += "\n"
+        stdout.write(game_board)
 
 class Nuruomino(Problem):
     def __init__(self, board: Board):
@@ -71,7 +105,6 @@ class Nuruomino(Problem):
         'state' passado como argumento. A ação a executar deve ser uma
         das presentes na lista obtida pela execução de
         self.actions(state)."""
-
         #TODO
         pass 
         
