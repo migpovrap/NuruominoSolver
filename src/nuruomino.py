@@ -7,6 +7,7 @@
 # 109686 Miguel Raposo
 
 from sys import stdin, stdout
+from enum import Enum
 from search import *
 
 class NuruominoState:
@@ -88,6 +89,12 @@ class Board:
             game_board += "\n"
         stdout.write(game_board)
 
+    def __repr__(self):
+        board_repr = "\n".join(" ".join(map(str, row)) for row in self.board)
+        regions_repr = "\n".join(f"Region {region}: {positions}"
+                                 for region, positions in self.regions.items())
+        return f"Board:\n{board_repr}\n{regions_repr}"
+
 class Nuruomino(Problem):
     def __init__(self, board: Board):
         """O construtor especifica o estado inicial."""
@@ -106,8 +113,7 @@ class Nuruomino(Problem):
         das presentes na lista obtida pela execução de
         self.actions(state)."""
         #TODO
-        pass 
-        
+        pass
 
     def goal_test(self, state: NuruominoState):
         """Retorna True se e só se o estado passado como argumento é
@@ -120,3 +126,51 @@ class Nuruomino(Problem):
         """Função heuristica utilizada para a procura A*."""
         # TODO
         pass
+
+class TetrominoType(Enum):
+    """Enum para representar os vários tipos de Tetromino."""
+    L = [(0,0), (1,0), (2,0), (2,1)]
+    I = [(0,0), (1,0), (2,0), (3,0)]
+    T = [(0,1), (1,0), (1,1), (1,2)]
+    S = [(0,1), (0,2), (1,0), (1,1)]
+
+class Tetromino:
+    """Representação interna de um tetramino e da posição na qual se encontra."""
+
+    def __init__(self, tetronimo_type: TetrominoType, rotation: int = 0, refleced: bool = False):
+        self.tetronimo_type = tetronimo_type
+        self.rotation = rotation
+        self.reflected = refleced
+
+    def __repr__(self):
+        return (f'Tetromino(type={self.tetronimo_type}, rotation={self.rotation} degrees, '
+            f'reflected={self.reflected})')
+
+    @staticmethod
+    def rotate(shape, degrees):
+        """Aplica uma rotação no valor (degrees)
+        assume que este é um multiplo de 90."""
+        for _ in range((degrees // 90) % 4): # Calculates the number of rotation to apply
+            shape = [(column, -row) for row, column in shape]
+        return shape
+
+    @staticmethod
+    def reflect(shape):
+        """Aplica uma refleção horizontal."""
+        return [(row, -column) for row, column in shape]
+
+    @staticmethod
+    def normalize(shape):
+        """Alinha os tetraminos em coordenadas padrão a partir de (0,0)."""
+        return [(row - min(r for r, _ in shape),
+                 col - min(c for _, c in shape)) for row, col in shape]
+
+    def get(self):
+        """Aplica a rotação e refleção devolvendo um conjunto de coordenadas
+        finais para o tetramino."""
+        tetromino = self.tetronimo_type.value
+        tetromino = Tetromino.rotate(tetromino, self.rotation)
+        if self.reflected:
+            tetromino = Tetromino.reflect(tetromino)
+        return Tetromino.normalize(tetromino)
+
