@@ -55,8 +55,10 @@ class Board:
         return self.board[row][col]
 
     def adjacent_positions(self, row:int, col:int) -> list:
-        """Devolve as posições adjacentes à região, em todas as direções, incluindo diagonais."""
-        adjacent_coordinates = [(-1,0), (-1,-1), (0,-1), (1,-1), (1,0), (1,1), (0,1), (-1,1)]
+        """Devolve as posições adjacentes à região, em todas as direções,
+        incluindo diagonais."""
+        adjacent_coordinates = [(-1,0), (-1,-1), (0,-1), (1,-1),
+                                (1,0), (1,1), (0,1), (-1,1)]
         adjacent_positions = []
         board_size = len(self.board)
         for drow, dcolumn in adjacent_coordinates:
@@ -74,10 +76,12 @@ class Board:
         return adjacent_values
 
     def adjacent_regions(self, region:int) -> list:
-        """Devolve uma lista das regiões que fazem fronteira com a região enviada no argumento."""
+        """Devolve uma lista das regiões que fazem fronteira com a
+        região enviada no argumento."""
         adjacent_regions = set()
         for row, col in self.regions[region]:
             adjacent_regions.update(self.adjacent_values(row, col))
+        adjacent_regions.discard(region)  # Don't include the region itself
         return list(adjacent_regions)
 
     def print_instance(self):
@@ -174,3 +178,15 @@ class Tetromino:
             tetromino = Tetromino.reflect(tetromino)
         return Tetromino.normalize(tetromino)
 
+class Action:
+    """Representação interna de uma ação (colocar uma peça (Tetromino)
+    numa localização especifíca no tabuleiro)."""
+    def __init__(self, region:int, tetromino:Tetromino, position:list[tuple[int,int]]):
+        self.region = region
+        self.tetromino = tetromino
+        self.position = position
+
+    def __repr__(self):
+        return (f'Action(region={self.region}, '
+            f'tetromino_type={self.tetromino.tetronimo_type.name}, position={self.position})')
+    #TODO Maybe add some checks to validate the viability of the actions
