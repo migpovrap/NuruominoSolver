@@ -19,8 +19,10 @@ class NuruominoState:
         Nuroumino.state_id += 1
 
     def __lt__(self, other):
-        """ Este método é utilizado em caso de empate na gestão da lista
-        de abertos nas procuras informadas. """
+        """ 
+            Este método é utilizado em caso de empate na gestão da lista
+            de abertos nas procuras informadas.
+        """
         return self.id < other.id
 
 class Board:
@@ -32,14 +34,15 @@ class Board:
 
     @staticmethod
     def parse_instance():
-        """Lê o test do standard input (stdin) que é passado como argumento
-        e retorna uma instância da classe Board.
+        """
+            Lê o test do standard input (stdin) que é passado como argumento
+            e retorna uma instância da classe Board.
 
-        Por exemplo:
-            $ python3 pipe.py < test-01.txt
+            Por exemplo:
+                $ python3 pipe.py < test-01.txt
 
-            > from sys import stdin
-            > line = stdin.readline().split()
+                > from sys import stdin
+                > line = stdin.readline().split()
         """
         board = []
         for line in stdin.read().split("\n"):
@@ -55,8 +58,10 @@ class Board:
         return self.board[row][col]
 
     def adjacent_positions(self, row:int, col:int) -> list:
-        """Devolve as posições adjacentes à região, em todas as direções,
-        incluindo diagonais."""
+        """
+            Devolve as posições adjacentes à região, em todas as direções,
+            incluindo diagonais.
+        """
         adjacent_coordinates = [(-1,0), (-1,-1), (0,-1), (1,-1),
                                 (1,0), (1,1), (0,1), (-1,1)]
         adjacent_positions = []
@@ -68,16 +73,20 @@ class Board:
         return adjacent_positions
 
     def adjacent_values(self, row:int, col:int) -> list:
-        """Devolve os valores das celulas adjacentes à região,
-        em todas as direções, incluindo diagonais."""
+        """
+            Devolve os valores das celulas adjacentes à região,
+            em todas as direções, incluindo diagonais.
+        """
         adjacent_values = set()
         for new_row, new_column in self.adjacent_positions(row, col):
             adjacent_values.add(self.board[new_row][new_column])
         return adjacent_values
 
     def adjacent_regions(self, region:int) -> list:
-        """Devolve uma lista das regiões que fazem fronteira com a
-        região enviada no argumento."""
+        """
+            Devolve uma lista das regiões que fazem fronteira com a
+            região enviada no argumento.
+        """
         adjacent_regions = set()
         for row, col in self.regions[region]:
             adjacent_regions.update(self.adjacent_values(row, col))
@@ -100,29 +109,37 @@ class Board:
         return f"Board:\n{board_repr}\n{regions_repr}"
 
 class Nuruomino(Problem):
+    """Puzzle where regions are filled with Tetrominoes; supports actions, results, goal tests, and heuristics."""
     def __init__(self, board: Board):
         """O construtor especifica o estado inicial."""
-        #TODO
-        pass 
+        self.board = board
+        self.initial = NuruominoState(board)
+        super().__init__(self.initial)
 
     def actions(self, state: NuruominoState):
-        """Retorna uma lista de ações que podem ser executadas a
-        partir do estado passado como argumento."""
+        """
+            Retorna uma lista de ações que podem ser executadas a
+            partir do estado passado como argumento.
+        """
         #TODO
         pass 
 
     def result(self, state: NuruominoState, action):
-        """Retorna o estado resultante de executar a 'action' sobre
-        'state' passado como argumento. A ação a executar deve ser uma
-        das presentes na lista obtida pela execução de
-        self.actions(state)."""
+        """
+            Retorna o estado resultante de executar a 'action' sobre
+            'state' passado como argumento. A ação a executar deve ser uma
+            das presentes na lista obtida pela execução de
+            self.actions(state).
+        """
         #TODO
         pass
 
     def goal_test(self, state: NuruominoState):
-        """Retorna True se e só se o estado passado como argumento é
-        um estado objetivo. Deve verificar se todas as posições do tabuleiro
-        estão preenchidas de acordo com as regras do problema."""
+        """
+            Retorna True se e só se o estado passado como argumento é
+            um estado objetivo. Deve verificar se todas as posições do tabuleiro
+            estão preenchidas de acordo com as regras do problema.
+        """
         #TODO
         pass 
 
@@ -152,8 +169,7 @@ class Tetromino:
 
     @staticmethod
     def rotate(shape, degrees):
-        """Aplica uma rotação no valor (degrees)
-        assume que este é um multiplo de 90."""
+        """Aplica uma rotação no valor (degrees) assume que este é um multiplo de 90."""
         for _ in range((degrees // 90) % 4): # Calculates the number of rotation to apply
             shape = [(column, -row) for row, column in shape]
         return shape
@@ -170,8 +186,10 @@ class Tetromino:
                  col - min(c for _, c in shape)) for row, col in shape]
 
     def get(self):
-        """Aplica a rotação e refleção devolvendo um conjunto de coordenadas
-        finais para o tetramino."""
+        """
+            Aplica a rotação e refleção devolvendo um conjunto de coordenadas
+            finais para o tetramino.
+        """
         tetromino = self.tetronimo_type.value
         tetromino = Tetromino.rotate(tetromino, self.rotation)
         if self.reflected:
@@ -179,8 +197,10 @@ class Tetromino:
         return Tetromino.normalize(tetromino)
 
 class Action:
-    """Representação interna de uma ação (colocar uma peça (Tetromino)
-    numa localização especifíca no tabuleiro)."""
+    """
+        Representação interna de uma ação (colocar uma peça (Tetromino)
+        numa localização especifíca no tabuleiro).
+    """
     def __init__(self, region:int, tetromino:Tetromino, position:list[tuple[int,int]]):
         self.region = region
         self.tetromino = tetromino
@@ -189,4 +209,21 @@ class Action:
     def __repr__(self):
         return (f'Action(region={self.region}, '
             f'tetromino_type={self.tetromino.tetronimo_type.name}, position={self.position})')
-    #TODO Maybe add some checks to validate the viability of the actions
+
+    def is_valid(self, board: Board) -> bool:
+        """
+            Verifies that the Tetromino can be placed entirely in the specified
+            region and doesn't overlap with filled cells.
+        """
+        for row, col in self.position:
+            if (row, col) not in board.regions[self.region]:
+                return False
+            if board.get_value(row, col) in ['L', 'I', 'T', 'S']:
+                return False
+
+    def does_overlap(self, other: 'Action') -> bool:
+        """
+            Checks if the current action positions overlaps with anothers one,
+            can be used to ensure two Tetrominos occupy the same cells.
+        """
+        return any(position in other.position for position in self.position)
