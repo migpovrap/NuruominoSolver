@@ -168,22 +168,22 @@ class Tetromino:
             f'reflected={self.reflected})')
 
     @staticmethod
-    def rotate(shape, degrees):
+    def rotate(tetromino, degrees):
         """Aplica uma rotação no valor (degrees) assume que este é um multiplo de 90."""
         for _ in range((degrees // 90) % 4): # Calculates the number of rotation to apply
-            shape = [(column, -row) for row, column in shape]
-        return shape
+            tetromino = [(column, -row) for row, column in tetromino]
+        return tetromino
 
     @staticmethod
-    def reflect(shape):
+    def reflect(tetromino):
         """Aplica uma refleção horizontal."""
-        return [(row, -column) for row, column in shape]
+        return [(row, -column) for row, column in tetromino]
 
     @staticmethod
-    def normalize(shape):
+    def normalize(tetromino):
         """Alinha os tetraminos em coordenadas padrão a partir de (0,0)."""
-        return [(row - min(r for r, _ in shape),
-                 col - min(c for _, c in shape)) for row, col in shape]
+        return [(row - min(row for row, _ in tetromino),
+                 col - min(col for _, col in tetromino)) for row, col in tetromino]
 
     def get(self):
         """
