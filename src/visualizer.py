@@ -1,7 +1,6 @@
 import argparse
 import os
 import random
-import sys
 
 from PIL import Image, ImageDraw
 
@@ -17,12 +16,15 @@ def board_to_image(board, regions):
     image = draw_pieces_on_board(image, board)
     return image
 
-def parse_board(path):
+def parse_board(path, parse_as_int=False):
     """Parse a board file and return a Board object."""
     board = []
-    with open(path, 'r') as file:
+    with open(path, 'r', encoding='utf-8') as file:
         for line in file:
-            board.append([int(x) for x in line.strip().split("\t") if x])
+            if parse_as_int:
+                board.append([int(x) for x in line.strip().split("\t") if x])
+            else:
+                board.append([x for x in line.strip().split("\t") if x])
     return Board(board)
 
 def draw_image_not_solved(rows:int, cols:int, regions):
@@ -115,15 +117,15 @@ def main():
             img = board_to_image(board_obj.board, board_obj.regions)
             frames.append(img.copy())
 
-        nuruomino_board = parse_board(test_in)
-        
+        nuruomino_board = parse_board(test_in, parse_as_int=True)
+
         # Add initial state
         initial_img = board_to_image(nuruomino_board.board, nuruomino_board.regions)
         frames.append(initial_img.copy())
-        
+
         problem = nuruomino.Nuruomino(nuruomino_board, on_state=on_state)
         solution = nuruomino.solve_nuruomino(problem)
-        
+
         if solution:
             # Add final solution state
             final_img = board_to_image(solution.state.board.board, solution.state.board.regions)
@@ -142,8 +144,8 @@ def main():
         else:
             print("No solution found or no intermediate steps captured")
     else:
-        nuruomino_board = parse_board(test_in)
-        nuruomino_board_result = parse_board(test_out)
+        nuruomino_board = parse_board(test_in, parse_as_int=True)
+        nuruomino_board_result = parse_board(test_out, parse_as_int=False)
         rows = len(nuruomino_board.board)
         cols = len(nuruomino_board.board[0])
         image = draw_image_not_solved(rows, cols, nuruomino_board.regions)
