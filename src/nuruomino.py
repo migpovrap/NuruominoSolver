@@ -21,10 +21,7 @@ class NuruominoState:
         NuruominoState.state_id += 1
 
     def __lt__(self, other):
-        """ 
-            Este método é utilizado em caso de empate na gestão da lista
-            de abertos nas procuras informadas.
-        """
+        """Used to break ties in informed search open lists."""
         return self.id < other.id
 
 class TetrominoType(Enum):
@@ -73,10 +70,7 @@ class Tetromino:
         return Tetromino.normalize(tetromino)
 
 class Action:
-    """
-        Internal representation of an action (placing a piece (Tetromino)
-        at a specific location on the board).
-    """
+    """Represents placing a Tetromino at a specific location."""
     def __init__(self, region:int, tetromino:Tetromino, position:list[tuple[int,int]]):
         self.region = region
         self.tetromino = tetromino
@@ -87,10 +81,7 @@ class Action:
             f'tetromino_type={self.tetromino.tetronimo_type.name}, position={self.position})')
 
     def is_valid(self, board: Board) -> bool:
-        """
-            Verifies that the Tetromino can be placed entirely in the specified
-            region and doesn't overlap with filled cells.
-        """
+        """Check if Tetromino fits in region and doesn't overlap filled cells."""
         for row, col in self.position:
             if row < 0 or col < 0 or row >= len(board.board) or col >= len(board.board[0]):
                 return False
@@ -102,10 +93,7 @@ class Action:
         return True 
 
     def does_overlap(self, other: 'Action') -> bool:
-        """
-            Checks if the current action positions overlaps with anothers one,
-            can be used to ensure two Tetrominos occupy the same cells.
-        """
+        """Check if this action overlaps with another action."""
         return any(position in other.position for position in self.position)
 
 class Board:
@@ -113,9 +101,20 @@ class Board:
 
     def __init__(self, board: list):
         self.board = board
-        self.regions = self.get_regions(board)
+        # self.regions: Maps region_id -> list of (row, col) cells in that region.
+        self.regions = self._get_regions(board)
+        # self._cell_to_region: (row, col) -> region_id for fast region lookup.
+        self.cell_to_region = self._build_cell_to_region()
 
-    def get_regions(self, board):
+    def _build_cell_to_region(self):
+        """Builds a mapping from cell coordinates to their region ID."""
+        cell_to_region = {}
+        for region_id, cells in self.regions.items():
+            for cell in cells:
+                cell_to_region[cell] = region_id
+        return cell_to_region
+
+    def _get_regions(self, board):
         """Builds a dict of the regions present in the board."""
         regions = {}
         for row, line in enumerate(board):
@@ -125,16 +124,7 @@ class Board:
 
     @staticmethod
     def parse_instance():
-        """
-            Lê o test do standard input (stdin) que é passado como argumento
-            e retorna uma instância da classe Board.
-
-            Por exemplo:
-                $ python3 pipe.py < test-01.txt
-
-                > from sys import stdin
-                > line = stdin.readline().split()
-        """
+        """Reads the board from stdin and returns a Board instance."""
         board = []
         for line in stdin:
             line = line.strip()
@@ -161,10 +151,7 @@ class Board:
         return adjacent_positions
 
     def adjacent_values(self, row:int, col:int) -> list:
-        """
-            Returns the values of the cells adjacent to the region,
-            in all directions, including diagonals.
-        """
+        """Returns values of cells adjacent to (row, col)."""
         adjacent_values = set()
         for new_row, new_column in self.adjacent_positions(row, col):
             adjacent_values.add(self.board[new_row][new_column])
@@ -175,16 +162,18 @@ class Board:
         adjacent_regions = set()
         for row, col in self.regions[region]:
             adjacent_regions.update(self.adjacent_values(row, col))
-        adjacent_regions.discard(region)  # Don't include the region itself
+        adjacent_regions.discard(region)
+        adjacent_regions = {r for r in adjacent_regions if isinstance(r, int)}
         return list(adjacent_regions)
 
     def print_instance(self):
         """Prints the string representation of the board."""
         game_board = ""
         for row in self.board:
+            row_str = ""
             for region in row:
-                game_board += f"{region}\t"
-            game_board += "\n"
+                row_str += f"{region}\t"
+            game_board += row_str.rstrip() + "\n"
         stdout.write(game_board)
 
     def copy(self):
@@ -223,17 +212,20 @@ class Board:
             return True
 
         visited = set()
-        queue = [next(iter(filled_cells))]
-        visited.add(next(iter(filled_cells)))
+        start_cell = next(iter(filled_cells))
+        queue = [start_cell]
+        visited.add(start_cell)
         orthogonal_directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
         while queue:
-            r, c = queue.pop(0)
-            for dr, dc in orthogonal_directions:
-                nr, nc = r + dr, c + dc
-                if 0 <= nr < len(self.board) and 0 <= nc < len(self.board[0]):
-                    if ((nr, nc) in filled_cells) and ((nr, nc) not in visited):
-                        visited.add((nr, nc))
-                        queue.append((nr, nc))
+            current_row, current_col = queue.pop(0)
+            for d_row, d_col in orthogonal_directions:
+                neighbor_row, neighbor_col = current_row + d_row, current_col + d_col
+                if (0 <= neighbor_row < len(self.board) and
+                    0 <= neighbor_col < len(self.board[0])):
+                    neighbor = (neighbor_row, neighbor_col)
+                    if neighbor in filled_cells and neighbor not in visited:
+                        queue.append(neighbor)
+                        visited.add(neighbor)
 
         return len(visited) == len(filled_cells)
 
@@ -260,14 +252,15 @@ class Board:
             for col in range(len(self.board[0])):
                 value = self.get_value(row, col)
                 if value in tetromino_ids:
-                    region = next(reg for reg, cells in self.regions.items() if (row, col) in cells)
-                    for dr, dc in [(-1,0), (1,0), (0,-1), (0,1)]:
-                        nr, nc = row + dr, col + dc
-                        if 0 <= nr < len(self.board) and 0 <= nc < len(self.board[0]):
-                            neighbor_value = self.get_value(nr, nc)
+                    for delta_row, delta_col in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                        neighbor_row = row + delta_row
+                        neighbor_col = col + delta_col
+                        if 0 <= neighbor_row < len(self.board) and 0 <= neighbor_col < len(self.board[0]):
+                            neighbor_value = self.get_value(neighbor_row, neighbor_col)
                             if neighbor_value == value:
-                                neighbor_region = next(reg for reg, cells in self.regions.items() if (nr, nc) in cells)
-                                if region != neighbor_region:
+                                current_region = self.cell_to_region.get((row, col))
+                                neighbor_region = self.cell_to_region.get((neighbor_row, neighbor_col))
+                                if current_region != neighbor_region:
                                     return True
         return False
 
@@ -283,7 +276,8 @@ class Board:
             for col in range(len(self.board[0])):
                 value = self.get_value(row, col)
                 if isinstance(value, str) and value in tetromino_ids:
-                    filled_cells.add((row, col))    
+                    filled_cells.add((row, col))
+
         if not filled_cells:
             return 0
         visited = set()
@@ -295,13 +289,13 @@ class Board:
             component = {start}
             visited.add(start)
             while queue:
-                r, c = queue.pop(0)
-                for dr, dc in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                    nr, nc = r + dr, c + dc
-                    if (nr, nc) in filled_cells and (nr, nc) not in visited:
-                        visited.add((nr, nc))
-                        component.add((nr, nc))
-                        queue.append((nr, nc))
+                current_row, current_col = queue.pop(0)
+                for delta_row, delta_col in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
+                    neighbor_row, neighbor_col = current_row + delta_row, current_col + delta_col
+                    if (neighbor_row, neighbor_col) in remaining and (neighbor_row, neighbor_col) not in component:
+                        queue.append((neighbor_row, neighbor_col))
+                        component.add((neighbor_row, neighbor_col))
+                        visited.add((neighbor_row, neighbor_col))
             remaining = remaining - component
             components += 1
         return components
@@ -320,12 +314,12 @@ class Nuruomino(Problem):
         self.board = board
         self.initial = NuruominoState(board)
         self.on_state = on_state
+        self._orientations = self._all_tetrominos_orientations()
         super().__init__(self.initial)
 
-    def get_all_tetromino_orientations(self):
-        """Get all possible tetromino orientations."""
+    def _all_tetrominos_orientations(self):
+        """Pre-compute all tetromino orientations once."""
         all_orientations = {}
-        
         for tetromino_type in TetrominoType:
             shapes = []
             shapes_orientations = []
@@ -344,74 +338,110 @@ class Nuruomino(Problem):
             all_orientations[tetromino_type.name] = shapes_orientations
         return all_orientations
 
-    @memoize
-    def is_valid_action(self, state, action):
-        """Check if the action is valid for the current state, with debug prints."""
+    def get_all_tetromino_orientations(self):
+        """Returns all possible orientations."""
+        return self._orientations
+
+    def _no_adjacent_same_tetromino(self, state, action):
+        """Return False if action would place a tetromino adjacent to the same type in a different region."""
+        tetromino_type = action.tetromino.tetronimo_type.name
         for row, col in action.position:
-            if row < 0 or col < 0 or row >= len(state.board.board) or col >= len(state.board.board[0]):
-                return False
-            if (row, col) not in state.board.regions[action.region]:
-                return False
-            value = state.board.get_value(row, col)
-            if isinstance(value, str) and value in ['L', 'I', 'T', 'S']:
-                return False
-        temp_board = state.board.copy()
-        temp_board.place_tetromino(action)
-        if temp_board.check_filled_square():
-            return False
-        if temp_board.check_adjacent_pieces_equal():
-            return False
-        filled_cells = []
-        for row_idx, row in enumerate(temp_board.board):
-            for col_idx, cell in enumerate(row):
-                if isinstance(cell, str) and cell in ['L', 'I', 'T', 'S']:
-                    filled_cells.append((row_idx, col_idx))
-            if len(filled_cells) > 4 and not temp_board.is_connected():
-              return False
+            for x, y in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                neighbor_row, neighbor_col = row + x, col + y
+                if 0 <= neighbor_row < len(state.board.board) and 0 <= neighbor_col < len(state.board.board[0]):
+                    neighbor_value = state.board.get_value(neighbor_row, neighbor_col)
+                    if neighbor_value == tetromino_type:
+                        neighbor_region = state.board.cell_to_region.get((neighbor_row, neighbor_col))
+                        if neighbor_region != action.region:
+                            return False
         return True
 
+    def _creates_filled_2x2_square(self, state, action):
+        """Return True if placing the action would create a filled 2x2 square."""
+        action_positions = set(action.position)
+        for row, col in action.position:
+            for offset_row in [-1, 0]:
+                for offset_col in [-1, 0]:
+                    square = [
+                        (row + offset_row, col + offset_col),
+                        (row + offset_row, col + offset_col + 1),
+                        (row + offset_row + 1, col + offset_col),
+                        (row + offset_row + 1, col + offset_col + 1)
+                    ]
+                    if all(0 <= square_row < len(state.board.board) and 0 <= square_col < len(state.board.board[0]) for square_row, square_col in square):
+                        filled = sum(
+                            (square_row, square_col) in action_positions or
+                            (isinstance(state.board.get_value(square_row, square_col), str) and state.board.get_value(square_row, square_col) in ['L', 'I', 'T', 'S'])
+                            for square_row, square_col in square
+                        )
+                        if filled == 4:
+                            return True
+        return False
+
+    def is_valid_action(self, state, action):
+        """Check if the action is valid for the current state."""
+        if not action.is_valid(state.board):
+            return False
+        if not self._no_adjacent_same_tetromino(state, action):
+            return False
+        if self._creates_filled_2x2_square(state, action):
+            return False
+        return True
+
+    def _select_next_region(self, state):
+        """Select the next region to fill: the one with the fewest empty cells (at least 4, not filled)."""
+        candidate = None
+        min_empty = float('inf')
+        for region_id, cells in state.board.regions.items():
+            filled = [cell for cell in cells if isinstance(state.board.get_value(*cell), str) and state.board.get_value(*cell) in [piece.name for piece in TetrominoType]]
+            empty = [cell for cell in cells if isinstance(state.board.get_value(*cell), int)]
+            if len(filled) == 0 and len(empty) >= 4 and len(empty) < min_empty:
+                candidate = (region_id, empty)
+                min_empty = len(empty)
+        return candidate if candidate else (None, None)
+
+    def _generate_region_actions(self, state, region_id, region_cells):
+        """Generate all valid actions for a given region."""
+        region_cell_set = set(region_cells)
+        actions_list = []
+        for tetromino_type in TetrominoType:
+            for rotation in [0, 90, 180, 270]:
+                for reflected in [False, True]:
+                    tetromino_shape = Tetromino(tetromino_type, rotation, reflected).get()
+                    for anchor_cell in region_cells:
+                        anchor_row, anchor_col = anchor_cell
+                        offset_row, offset_col = tetromino_shape[0]
+                        base_row = anchor_row - offset_row
+                        base_col = anchor_col - offset_col
+                        positions = [(base_row + row, base_col + col) for row, col in tetromino_shape]
+                        if all(pos in region_cell_set for pos in positions):
+                            action = Action(region_id, Tetromino(tetromino_type, rotation, reflected), positions)
+                            if self.is_valid_action(state, action):
+                                actions_list.append(action)
+        return actions_list
+
+    def _unique_actions(self, actions_list):
+        """Filter actions to ensure uniqueness by position."""
+        unique_actions = []
+        seen = set()
+        for action in actions_list:
+            pos_tuple = tuple(sorted(action.position))
+            if pos_tuple not in seen:
+                seen.add(pos_tuple)
+                unique_actions.append(action)
+        return unique_actions
+
     def actions(self, state):
-        """Return a list of valid actions for the current state."""
         if self.goal_test(state):
             return []
-        unfilled_regions = []
-        for region_id in state.board.regions:
-            region_cells = state.board.regions[region_id]
-            if all(isinstance(state.board.get_value(*cell), int) for cell in region_cells):
-                unfilled_regions.append((region_id, len(region_cells)))
-        unfilled_regions.sort(key=lambda x: (x[1] != 4, x[1]))
-        for region_id, _ in unfilled_regions:
-            actions_list = []
-            region_cells = state.board.regions[region_id]
-            region_cell_set = set(region_cells)
-            all_orientations = self.get_all_tetromino_orientations()
-            
-            for tetromino_type in TetrominoType:
-                for tetromino, shape in all_orientations[tetromino_type.name]:
-                    for region_cell in region_cells:
-                        for shape_offset in shape:
-                            anchor_row = region_cell[0] - shape_offset[0]
-                            anchor_col = region_cell[1] - shape_offset[1]
-                            positions = [(anchor_row + dr, anchor_col + dc) for dr, dc in shape]
-                            if all(pos in region_cell_set and isinstance(state.board.get_value(*pos), int) for pos in positions):
-                                action = Action(region_id, tetromino, positions)
-                                if self.is_valid_action(state, action):
-                                    actions_list.append(action)
-            unique_actions = []
-            seen_positions = set()
-            for action in actions_list:
-                pos_tuple = tuple(sorted(action.position))
-                if pos_tuple not in seen_positions:
-                    seen_positions.add(pos_tuple)
-                    unique_actions.append(action)
-            if unique_actions:
-                return unique_actions
-        return []
+        region_id, region_cells = self._select_next_region(state)
+        if region_id is None:
+            return []
+        actions_list = self._generate_region_actions(state, region_id, region_cells)
+        return self._unique_actions(actions_list)
 
     def result(self, state, action):
-        """
-        Return the state that results from executing the given action.
-        """
+        """Return the state that results from executing the given action."""
         new_board = state.board.copy()
         new_board.place_tetromino(action)
         new_state = NuruominoState(new_board)
@@ -420,9 +450,7 @@ class Nuruomino(Problem):
         return new_state
 
     def goal_test(self, state):
-        """
-        Test if the given state is a goal state.
-        """
+        """Test if the given state is a goal state."""
         if not state.board.check_all_regions_filled():
             return False
         if not state.board.is_connected():
@@ -433,31 +461,48 @@ class Nuruomino(Problem):
             return False
         return True
 
+    def value(self, state):
+        filled = sum(
+            self.board.check_region_filled(region_id)
+            for region_id in state.board.regions
+        )
+        penalty = 0
+        if not state.board.is_connected():
+            penalty += 100
+        if state.board.check_filled_square():
+            penalty += 100
+        if state.board.check_adjacent_pieces_equal():
+            penalty += 100
+        return filled - penalty
+
     def h(self, node):
         """Heuristic function for informed search."""
         state = node.state
         unfilled_regions = state.board.count_regions_not_filled()
+        if unfilled_regions > 10:
+            return unfilled_regions
         connectivity_penalty = 0
         components = state.board.count_connected_tetrominos()
         if components > 1:
             connectivity_penalty = components - 1
-        square_penalty = 5 if state.board.check_filled_square() else 0
-        adjacent_penalty = 5 if state.board.check_adjacent_pieces_equal() else 0
-        return unfilled_regions + 2 * connectivity_penalty + square_penalty + adjacent_penalty
+        return unfilled_regions + connectivity_penalty
 
 
 def solve_nuruomino(problem):
-    """Adjust search strategies based on puzzle complexity."""
+    """Optimized search strategy selection."""
     actual_problem = problem.problem if hasattr(problem, 'problem') else problem
     num_regions = len(actual_problem.board.regions)
     search_problem = actual_problem if (hasattr(actual_problem, 'on_state') and actual_problem.on_state) else problem
-    
-    if num_regions <= 6:
+    four_cell_regions = sum(1 for cells in actual_problem.board.regions.values() if len(cells) == 4)
+    total_cells = sum(len(cells) for cells in actual_problem.board.regions.values())
+    if num_regions <= 5:
         return astar_search(search_problem, h=actual_problem.h)
-    elif num_regions <= 10:
-        return depth_first_graph_search(search_problem)
+    elif four_cell_regions >= num_regions * 0.7:
+        return astar_search(search_problem, h=actual_problem.h)
+    elif total_cells <= 60:
+        return astar_search(search_problem, h=actual_problem.h)
     else:
-        return iterative_deepening_search(search_problem)
+        return depth_first_graph_search(search_problem)
 
 if __name__ == "__main__":
     game_board = Board.parse_instance()
