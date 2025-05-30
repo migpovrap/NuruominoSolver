@@ -1,7 +1,7 @@
 import argparse
 import os
-import random
-
+import cv2
+import numpy as np
 from PIL import Image, ImageDraw
 
 from nuruomino import Board
@@ -56,31 +56,27 @@ def draw_image_not_solved(rows:int, cols:int, regions):
     return image
 
 def draw_pieces_on_board(image: Image, piece_board: list[list[str]]):
-    """Draw colored pieces on the board image."""
+    """Draw colored pieces on the board image, one color per letter (L, T, I, S)."""
     source = ImageDraw.Draw(image)
     cell_size = 40
     padding = 4
 
-    unique_letters = {ch for row in piece_board for ch in row if ch in ['L', 'S', 'I', 'T']}
     color_map = {
-        letter: (
-        random.randint(100, 255),
-        random.randint(100, 255),
-        random.randint(100, 255)
-        )
-        for letter in unique_letters
+        'L': (255, 99, 71),     # Tomato Red
+        'S': (60, 179, 113),   # Medium Sea Green
+        'I': (65, 105, 225),   # Royal Blue
+        'T': (238, 130, 238),  # Violet
     }
 
     for row_idx, row in enumerate(piece_board):
         for col_idx, cell in enumerate(row):
-            if cell not in ['L', 'S', 'I', 'T']:
-                continue
-            color = color_map[cell]
-            x0 = col_idx * cell_size + padding
-            y0 = row_idx * cell_size + padding
-            x1 = (col_idx + 1) * cell_size - padding
-            y1 = (row_idx + 1) * cell_size - padding
-            source.rectangle([x0, y0, x1, y1], fill=color)
+            if cell in color_map:
+                color = color_map[cell]
+                x0 = col_idx * cell_size + padding
+                y0 = row_idx * cell_size + padding
+                x1 = (col_idx + 1) * cell_size - padding
+                y1 = (row_idx + 1) * cell_size - padding
+                source.rectangle([x0, y0, x1, y1], fill=color)
 
     return image
 
@@ -96,6 +92,7 @@ def main():
     parser.add_argument("input_file", help="Input board file (e.g., test01.txt)")
     parser.add_argument("output_file", help="Output board file (e.g., test01.out)")
     parser.add_argument("--gif", action="store_true", help="Generate GIF of solving process")
+    parser.add_argument("--realtime", action="store_true", help="Show real-time solving visualization (requires --gif)")
     args = parser.parse_args()
 
     test_in = args.input_file
@@ -110,28 +107,45 @@ def main():
     images_dir = os.path.join(test_dir, "images")
     os.makedirs(images_dir, exist_ok=True)
 
-    if args.gif:
+    if args.realtime or args.gif:
         frames = []
 
         def on_state(board_obj):
             img = board_to_image(board_obj.board, board_obj.regions)
-            frames.append(img.copy())
+            if args.gif:
+                frames.append(img.copy())
+            if args.realtime:
+                img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+                cv2.imshow("Nuruomino Solver", img_cv)
+                cv2.waitKey(400)  # Adjust delay as needed
 
         nuruomino_board = parse_board(test_in, parse_as_int=True)
 
         # Add initial state
         initial_img = board_to_image(nuruomino_board.board, nuruomino_board.regions)
-        frames.append(initial_img.copy())
+        if args.gif:
+            frames.append(initial_img.copy())
+        if args.realtime:
+            img_cv = cv2.cvtColor(np.array(initial_img), cv2.COLOR_RGB2BGR)
+            cv2.imshow("Nuruomino Solver", img_cv)
+            cv2.waitKey(400)
 
         problem = nuruomino.Nuruomino(nuruomino_board, on_state=on_state)
         solution = nuruomino.solve_nuruomino(problem)
 
         if solution:
-            # Add final solution state
             final_img = board_to_image(solution.state.board.board, solution.state.board.regions)
-            frames.append(final_img.copy())
+            if args.gif:
+                frames.append(final_img.copy())
+            if args.realtime:
+                img_cv = cv2.cvtColor(np.array(final_img), cv2.COLOR_RGB2BGR)
+                cv2.imshow("Nuruomino Solver", img_cv)
+                cv2.waitKey(0)  # Wait for key press to close
 
-        if len(frames) > 1:
+        if args.realtime:
+            cv2.destroyAllWindows()
+
+        if args.gif and len(frames) > 1:
             gif_path = os.path.join(images_dir, f"{test_name}_solution.gif")
             frames[0].save(
                 gif_path,
@@ -141,7 +155,7 @@ def main():
                 loop=0
             )
             print(f"GIF saved to {gif_path} with {len(frames)} frames")
-        else:
+        elif args.gif:
             print("No solution found or no intermediate steps captured")
     else:
         nuruomino_board = parse_board(test_in, parse_as_int=True)
