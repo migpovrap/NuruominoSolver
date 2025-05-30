@@ -105,6 +105,7 @@ class Board:
         self.regions = self._get_regions(board)
         # self._cell_to_region: (row, col) -> region_id for fast region lookup.
         self.cell_to_region = self._build_cell_to_region()
+        self.size = len(board)
 
     def _build_cell_to_region(self):
         """Builds a mapping from cell coordinates to their region ID."""
@@ -346,9 +347,9 @@ class Nuruomino(Problem):
         """Return False if action would place a tetromino adjacent to the same type in a different region."""
         tetromino_type = action.tetromino.tetronimo_type.name
         for row, col in action.position:
-            for x, y in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
-                neighbor_row, neighbor_col = row + x, col + y
-                if 0 <= neighbor_row < len(state.board.board) and 0 <= neighbor_col < len(state.board.board[0]):
+            for delta_row, delta_col in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                neighbor_row, neighbor_col = row + delta_row, col + delta_col
+                if 0 <= neighbor_row < state.board.size and 0 <= neighbor_col < state.board.size:
                     neighbor_value = state.board.get_value(neighbor_row, neighbor_col)
                     if neighbor_value == tetromino_type:
                         neighbor_region = state.board.cell_to_region.get((neighbor_row, neighbor_col))
@@ -368,7 +369,7 @@ class Nuruomino(Problem):
                         (row + offset_row + 1, col + offset_col),
                         (row + offset_row + 1, col + offset_col + 1)
                     ]
-                    if all(0 <= square_row < len(state.board.board) and 0 <= square_col < len(state.board.board[0]) for square_row, square_col in square):
+                    if all(0 <= square_row < state.board.size and 0 <= square_col < state.board.size for square_row, square_col in square):
                         filled = sum(
                             (square_row, square_col) in action_positions or
                             (isinstance(state.board.get_value(square_row, square_col), str) and state.board.get_value(square_row, square_col) in ['L', 'I', 'T', 'S'])
@@ -379,7 +380,7 @@ class Nuruomino(Problem):
         return False
 
     def is_valid_action(self, state, action):
-        """Check if the action is valid for the current state."""
+        """Check if the action is valid - optimized with early exits."""
         if not action.is_valid(state.board):
             return False
         if not self._no_adjacent_same_tetromino(state, action):
@@ -401,23 +402,21 @@ class Nuruomino(Problem):
         return candidate if candidate else (None, None)
 
     def _generate_region_actions(self, state, region_id, region_cells):
-        """Generate all valid actions for a given region."""
+        """Generate all valid actions for a given region - optimized."""
         region_cell_set = set(region_cells)
         actions_list = []
         for tetromino_type in TetrominoType:
-            for rotation in [0, 90, 180, 270]:
-                for reflected in [False, True]:
-                    tetromino_shape = Tetromino(tetromino_type, rotation, reflected).get()
-                    for anchor_cell in region_cells:
-                        anchor_row, anchor_col = anchor_cell
-                        offset_row, offset_col = tetromino_shape[0]
-                        base_row = anchor_row - offset_row
-                        base_col = anchor_col - offset_col
-                        positions = [(base_row + row, base_col + col) for row, col in tetromino_shape]
-                        if all(pos in region_cell_set for pos in positions):
-                            action = Action(region_id, Tetromino(tetromino_type, rotation, reflected), positions)
-                            if self.is_valid_action(state, action):
-                                actions_list.append(action)
+            for tetromino, shape in self._orientations[tetromino_type.name]:
+                for anchor_cell in region_cells:
+                    anchor_row, anchor_col = anchor_cell
+                    offset_row, offset_col = shape[0]
+                    base_row = anchor_row - offset_row
+                    base_col = anchor_col - offset_col
+                    positions = [(base_row + row, base_col + col) for row, col in shape]
+                    if all(pos in region_cell_set for pos in positions):
+                        action = Action(region_id, tetromino, positions)
+                        if self.is_valid_action(state, action):
+                            actions_list.append(action)
         return actions_list
 
     def _unique_actions(self, actions_list):
@@ -442,8 +441,11 @@ class Nuruomino(Problem):
 
     def result(self, state, action):
         """Return the state that results from executing the given action."""
-        new_board = state.board.copy()
-        new_board.place_tetromino(action)
+        new_board = Board(copy.deepcopy(state.board.board))
+        new_board.regions = state.board.regions
+        new_board.cell_to_region = state.board.cell_to_region
+        for row, col in action.position:
+            new_board.board[row][col] = action.tetromino.tetronimo_type.name
         new_state = NuruominoState(new_board)
         if self.on_state:
             self.on_state(new_board)
@@ -476,16 +478,16 @@ class Nuruomino(Problem):
         return filled - penalty
 
     def h(self, node):
-        """Heuristic function for informed search."""
+        """Optimized heuristic function for informed search."""
         state = node.state
         unfilled_regions = state.board.count_regions_not_filled()
-        if unfilled_regions > 10:
-            return unfilled_regions
-        connectivity_penalty = 0
-        components = state.board.count_connected_tetrominos()
-        if components > 1:
-            connectivity_penalty = components - 1
-        return unfilled_regions + connectivity_penalty
+        if unfilled_regions == 0:
+            return 0
+        if unfilled_regions <= 3:
+            components = state.board.count_connected_tetrominos()
+            if components > 1:
+                return unfilled_regions + (components - 1)
+        return unfilled_regions
 
 
 def solve_nuruomino(problem):
