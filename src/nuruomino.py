@@ -10,9 +10,10 @@ from __future__ import annotations
 from sys import stdin, stdout
 from enum import Enum
 import copy
-from search import *
+from search import Problem, astar_search, depth_first_graph_search, InstrumentedProblem
 
 class NuruominoState:
+    """Represents the state of the Nuruomino puzzle, including the board configuration and a unique state ID."""
     state_id = 0
 
     def __init__(self, board):
@@ -83,7 +84,7 @@ class Action:
     def is_valid(self, board: Board) -> bool:
         """Check if Tetromino fits in region and doesn't overlap filled cells."""
         for row, col in self.position:
-            if row < 0 or col < 0 or row >= len(board.board) or col >= len(board.board[0]):
+            if row < 0 or col < 0 or row >= board.size or col >= board.size:
                 return False
             if (row, col) not in board.regions[self.region]:
                 return False
@@ -144,7 +145,7 @@ class Board:
         adjacent_coordinates = [(-1,0), (-1,-1), (0,-1), (1,-1),
                                 (1,0), (1,1), (0,1), (-1,1)]
         adjacent_positions = []
-        board_size = len(self.board)
+        board_size = self.size
         for drow, dcolumn in adjacent_coordinates:
             new_row, new_column = row + drow, col + dcolumn
             if 0 <= new_row < board_size and 0 <= new_column < board_size:
@@ -169,13 +170,13 @@ class Board:
 
     def print_instance(self):
         """Prints the string representation of the board."""
-        game_board = ""
+        board_str = ""
         for row in self.board:
             row_str = ""
             for region in row:
                 row_str += f"{region}\t"
-            game_board += row_str.rstrip() + "\n"
-        stdout.write(game_board)
+            board_str += row_str.rstrip() + "\n"
+        stdout.write(board_str)
 
     def copy(self):
         """Creates a deep copy of the board."""
@@ -204,8 +205,8 @@ class Board:
         """Check if all filled cells form a single connected group."""
         tetromino_ids = {t.name for t in TetrominoType}
         filled_cells = set()
-        for row in range(len(self.board)):
-            for col in range(len(self.board[0])):
+        for row in range(self.size):
+            for col in range(self.size):
                 if isinstance(self.get_value(row, col), str) and self.get_value(row, col) in tetromino_ids:
                     filled_cells.add((row, col))
 
@@ -221,8 +222,8 @@ class Board:
             current_row, current_col = queue.pop(0)
             for d_row, d_col in orthogonal_directions:
                 neighbor_row, neighbor_col = current_row + d_row, current_col + d_col
-                if (0 <= neighbor_row < len(self.board) and
-                    0 <= neighbor_col < len(self.board[0])):
+                if (0 <= neighbor_row < self.size and
+                    0 <= neighbor_col < self.size):
                     neighbor = (neighbor_row, neighbor_col)
                     if neighbor in filled_cells and neighbor not in visited:
                         queue.append(neighbor)
@@ -233,8 +234,8 @@ class Board:
     def check_filled_square(self):
         """Check if there are any 2x2 squares fully filled in the board with tetromino cells."""
         tetromino_ids = {t.name for t in TetrominoType}
-        for row in range(len(self.board) - 1):
-            for col in range(len(self.board[0]) - 1):
+        for row in range(self.size - 1):
+            for col in range(self.size - 1):
                 positions = [(row, col), (row, col+1), (row+1, col), (row+1, col+1)]
                 filled = True
                 for r, c in positions:
@@ -249,14 +250,14 @@ class Board:
     def check_adjacent_pieces_equal(self):
         """Return True if any orthogonally adjacent cells from different regions have the same tetromino type."""
         tetromino_ids = {t.name for t in TetrominoType}
-        for row in range(len(self.board)):
-            for col in range(len(self.board[0])):
+        for row in range(self.size):
+            for col in range(self.board.size):
                 value = self.get_value(row, col)
                 if value in tetromino_ids:
                     for delta_row, delta_col in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                         neighbor_row = row + delta_row
                         neighbor_col = col + delta_col
-                        if 0 <= neighbor_row < len(self.board) and 0 <= neighbor_col < len(self.board[0]):
+                        if 0 <= neighbor_row < self.board.size and 0 <= neighbor_col < self.board.size:
                             neighbor_value = self.get_value(neighbor_row, neighbor_col)
                             if neighbor_value == value:
                                 current_region = self.cell_to_region.get((row, col))
@@ -273,8 +274,8 @@ class Board:
         """Count the number of connected groups of filled tetromino cells."""
         tetromino_ids = {t.name for t in TetrominoType}
         filled_cells = set()
-        for row in range(len(self.board)):
-            for col in range(len(self.board[0])):
+        for row in range(self.size):
+            for col in range(self.size):
                 value = self.get_value(row, col)
                 if isinstance(value, str) and value in tetromino_ids:
                     filled_cells.add((row, col))
@@ -508,10 +509,10 @@ def solve_nuruomino(problem):
 
 if __name__ == "__main__":
     game_board = Board.parse_instance()
-    problem = Nuruomino(game_board)
-    initial_state = problem.initial
+    lits_problem = Nuruomino(game_board)
+    initial_state = lits_problem.initial
 
-    instrumented = InstrumentedProblem(problem)
+    instrumented = InstrumentedProblem(lits_problem)
     solution = solve_nuruomino(instrumented)
 
     if solution:
