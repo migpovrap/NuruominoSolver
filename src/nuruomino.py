@@ -81,15 +81,18 @@ class Action:
         return (f'Action(region={self.region}, '
             f'tetromino_type={self.tetromino.tetronimo_type.name}, position={self.position})')
 
-    def is_valid(self, board: Board) -> bool:
+    def is_valid(self, board: 'Board') -> bool:
         """Check if Tetromino fits in region and doesn't overlap filled cells."""
+        # Convert regions[region] to set for O(1) lookup
+        region_cells = set(board.regions[self.region])
+        
         for row, col in self.position:
             if row < 0 or col < 0 or row >= board.size or col >= board.size:
                 return False
-            if (row, col) not in board.regions[self.region]:
+            if (row, col) not in region_cells:
                 return False
             value = board.get_value(row, col)
-            if isinstance(value, str) and value in ['L', 'I', 'T', 'S']:
+            if isinstance(value, str) and value in {'L', 'I', 'T', 'S'}:
                 return False
         return True 
 
@@ -102,9 +105,7 @@ class Board:
 
     def __init__(self, board: list):
         self.board = board
-        # self.regions: Maps region_id -> list of (row, col) cells in that region.
         self.regions = self._get_regions(board)
-        # self._cell_to_region: (row, col) -> region_id for fast region lookup.
         self.cell_to_region = self._build_cell_to_region()
         self.size = len(board)
 
@@ -189,13 +190,15 @@ class Board:
 
     def check_region_filled(self, region_id):
         """Returns true if the region contains exactly 4 filled cells forming a tetromino."""
-        tetromino_ids = [t.name for t in TetrominoType]
-        filled_cells = [(row, col) for row, col in self.regions[region_id] 
-                    if isinstance(self.board[row][col], str) and self.board[row][col] in tetromino_ids]
-        return len(filled_cells) == 4
+        filled_count = 0
+        for row, col in self.regions[region_id]:
+            value = self.board[row][col]
+            if isinstance(value, str) and value in {'L', 'I', 'T', 'S'}:
+                filled_count += 1
+        return filled_count == 4
 
     def check_all_regions_filled(self):
-        """Retruns true if all the regions are filled with a tetromino."""
+        """Returns true if all the regions are filled with a tetromino."""
         for region_id in self.regions:
             if not self.check_region_filled(region_id):
                 return False
@@ -203,11 +206,11 @@ class Board:
 
     def is_connected(self):
         """Check if all filled cells form a single connected group."""
-        tetromino_ids = {t.name for t in TetrominoType}
         filled_cells = set()
         for row in range(self.size):
             for col in range(self.size):
-                if isinstance(self.get_value(row, col), str) and self.get_value(row, col) in tetromino_ids:
+                value = self.get_value(row, col)
+                if isinstance(value, str) and value in {'L', 'I', 'T', 'S'}:
                     filled_cells.add((row, col))
 
         if not filled_cells:
@@ -217,50 +220,41 @@ class Board:
         start_cell = next(iter(filled_cells))
         queue = [start_cell]
         visited.add(start_cell)
-        orthogonal_directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]
+        
         while queue:
             current_row, current_col = queue.pop(0)
-            for d_row, d_col in orthogonal_directions:
-                neighbor_row, neighbor_col = current_row + d_row, current_col + d_col
-                if (0 <= neighbor_row < self.size and
-                    0 <= neighbor_col < self.size):
-                    neighbor = (neighbor_row, neighbor_col)
-                    if neighbor in filled_cells and neighbor not in visited:
-                        queue.append(neighbor)
-                        visited.add(neighbor)
+            for d_row, d_col in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
+                neighbor = (current_row + d_row, current_col + d_col)
+                if (neighbor in filled_cells and neighbor not in visited):
+                    queue.append(neighbor)
+                    visited.add(neighbor)
 
         return len(visited) == len(filled_cells)
 
     def check_filled_square(self):
         """Check if there are any 2x2 squares fully filled in the board with tetromino cells."""
-        tetromino_ids = {t.name for t in TetrominoType}
         for row in range(self.size - 1):
             for col in range(self.size - 1):
                 positions = [(row, col), (row, col+1), (row+1, col), (row+1, col+1)]
-                filled = True
-                for r, c in positions:
-                    value = self.get_value(r, c)
-                    if not (isinstance(value, str) and value in tetromino_ids):
-                        filled = False
-                        break
-                if filled:
+                if all(isinstance(self.get_value(r, c), str) and 
+                      self.get_value(r, c) in {'L', 'I', 'T', 'S'} 
+                      for r, c in positions):
                     return True
         return False
 
     def check_adjacent_pieces_equal(self):
         """Return True if any orthogonally adjacent cells from different regions have the same tetromino type."""
-        tetromino_ids = {t.name for t in TetrominoType}
         for row in range(self.size):
             for col in range(self.size):
                 value = self.get_value(row, col)
-                if value in tetromino_ids:
+                if isinstance(value, str) and value in {'L', 'I', 'T', 'S'}:
+                    current_region = self.cell_to_region.get((row, col))
                     for delta_row, delta_col in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                         neighbor_row = row + delta_row
                         neighbor_col = col + delta_col
-                        if 0 <= neighbor_row < self.size and 0 <= neighbor_col < self.size:
+                        if (0 <= neighbor_row < self.size and 0 <= neighbor_col < self.size):
                             neighbor_value = self.get_value(neighbor_row, neighbor_col)
                             if neighbor_value == value:
-                                current_region = self.cell_to_region.get((row, col))
                                 neighbor_region = self.cell_to_region.get((neighbor_row, neighbor_col))
                                 if current_region != neighbor_region:
                                     return True
@@ -272,12 +266,11 @@ class Board:
 
     def count_connected_tetrominos(self):
         """Count the number of connected groups of filled tetromino cells."""
-        tetromino_ids = {t.name for t in TetrominoType}
         filled_cells = set()
         for row in range(self.size):
             for col in range(self.size):
                 value = self.get_value(row, col)
-                if isinstance(value, str) and value in tetromino_ids:
+                if isinstance(value, str) and value in {'L', 'I', 'T', 'S'}:
                     filled_cells.add((row, col))
 
         if not filled_cells:
@@ -293,11 +286,11 @@ class Board:
             while queue:
                 current_row, current_col = queue.pop(0)
                 for delta_row, delta_col in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                    neighbor_row, neighbor_col = current_row + delta_row, current_col + delta_col
-                    if (neighbor_row, neighbor_col) in remaining and (neighbor_row, neighbor_col) not in component:
-                        queue.append((neighbor_row, neighbor_col))
-                        component.add((neighbor_row, neighbor_col))
-                        visited.add((neighbor_row, neighbor_col))
+                    neighbor = (current_row + delta_row, current_col + delta_col)
+                    if neighbor in remaining and neighbor not in component:
+                        queue.append(neighbor)
+                        component.add(neighbor)
+                        visited.add(neighbor)
             remaining = remaining - component
             components += 1
         return components
@@ -311,16 +304,16 @@ class Board:
 class Nuruomino(Problem):
     """Puzzle where regions are filled with Tetrominoes; supports actions, results, goal tests, and heuristics."""
 
-    def __init__(self, board: Board, on_state=None):
-        """The constructor specifies the initial state."""
-        self.board = board
-        self.initial = NuruominoState(board)
-        self.on_state = on_state
-        self._orientations = self._all_tetrominos_orientations()
-        super().__init__(self.initial)
+    _orientations_cache = None
 
-    def _all_tetrominos_orientations(self):
-        """Pre-compute all tetromino orientations once."""
+    @classmethod
+    def get_orientations(cls):
+        if cls._orientations_cache is None:
+            cls._orientations_cache = cls._compute_all_orientations()
+        return cls._orientations_cache
+
+    @classmethod
+    def _compute_all_orientations(cls):
         all_orientations = {}
         for tetromino_type in TetrominoType:
             shapes = []
@@ -329,16 +322,19 @@ class Nuruomino(Problem):
                 for reflected in [False, True]:
                     tetromino = Tetromino(tetromino_type, rotation, reflected)
                     shape = tetromino.get()
-                    is_unique = True
-                    for existing_shape in shapes:
-                        if sorted(shape) == sorted(existing_shape):
-                            is_unique = False
-                            break
-                    if is_unique:
+                    if not any(sorted(shape) == sorted(existing) for existing in shapes):
                         shapes.append(shape)
                         shapes_orientations.append((tetromino, shape))
             all_orientations[tetromino_type.name] = shapes_orientations
         return all_orientations
+
+    def __init__(self, board: Board, on_state=None):
+        """The constructor specifies the initial state."""
+        self.board = board
+        self.initial = NuruominoState(board)
+        self.on_state = on_state
+        self._orientations = self.get_orientations()
+        super().__init__(self.initial)
 
     def get_all_tetromino_orientations(self):
         """Returns all possible orientations."""
@@ -350,7 +346,7 @@ class Nuruomino(Problem):
         for row, col in action.position:
             for delta_row, delta_col in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                 neighbor_row, neighbor_col = row + delta_row, col + delta_col
-                if 0 <= neighbor_row < state.board.size and 0 <= neighbor_col < state.board.size:
+                if (0 <= neighbor_row < state.board.size and 0 <= neighbor_col < state.board.size):
                     neighbor_value = state.board.get_value(neighbor_row, neighbor_col)
                     if neighbor_value == tetromino_type:
                         neighbor_region = state.board.cell_to_region.get((neighbor_row, neighbor_col))
@@ -370,18 +366,19 @@ class Nuruomino(Problem):
                         (row + offset_row + 1, col + offset_col),
                         (row + offset_row + 1, col + offset_col + 1)
                     ]
-                    if all(0 <= square_row < state.board.size and 0 <= square_col < state.board.size for square_row, square_col in square):
+                    if all(0 <= sr < state.board.size and 0 <= sc < state.board.size for sr, sc in square):
                         filled = sum(
-                            (square_row, square_col) in action_positions or
-                            (isinstance(state.board.get_value(square_row, square_col), str) and state.board.get_value(square_row, square_col) in ['L', 'I', 'T', 'S'])
-                            for square_row, square_col in square
+                            (sr, sc) in action_positions or
+                            (isinstance(state.board.get_value(sr, sc), str) and 
+                             state.board.get_value(sr, sc) in {'L', 'I', 'T', 'S'})
+                            for sr, sc in square
                         )
                         if filled == 4:
                             return True
         return False
 
     def is_valid_action(self, state, action):
-        """Check if the action is valid - optimized with early exits."""
+        """Check if the action is valid."""
         if not action.is_valid(state.board):
             return False
         if not self._no_adjacent_same_tetromino(state, action):
@@ -391,23 +388,32 @@ class Nuruomino(Problem):
         return True
 
     def _select_next_region(self, state):
-        """Select the next region to fill: the one with the fewest empty cells (at least 4, not filled)."""
-        candidate = None
-        min_empty = float('inf')
+        """Select region with smallest size first, then lowest ID."""
+        candidates = []
         for region_id, cells in state.board.regions.items():
-            filled = [cell for cell in cells if isinstance(state.board.get_value(*cell), str) and state.board.get_value(*cell) in [piece.name for piece in TetrominoType]]
-            empty = [cell for cell in cells if isinstance(state.board.get_value(*cell), int)]
-            if len(filled) == 0 and len(empty) >= 4 and len(empty) < min_empty:
-                candidate = (region_id, empty)
-                min_empty = len(empty)
-        return candidate if candidate else (None, None)
+            if state.board.check_region_filled(region_id):
+                continue
+            filled_count = sum(1 for cell in cells 
+                             if isinstance(state.board.get_value(*cell), str) and 
+                             state.board.get_value(*cell) in {'L', 'I', 'T', 'S'})
+            if filled_count > 0:  # Skip partially filled regions
+                continue
+            empty_cells = [cell for cell in cells 
+                          if isinstance(state.board.get_value(*cell), int)]
+            if len(empty_cells) >= 4:  # Can fit tetromino
+                candidates.append((len(empty_cells), region_id, empty_cells))
+        if not candidates:
+            return None, None
+        # Sort by size first, then by region_id
+        candidates.sort(key=lambda x: (x[0], x[1]))
+        return candidates[0][1], candidates[0][2]
 
     def _generate_region_actions(self, state, region_id, region_cells):
-        """Generate all valid actions for a given region - optimized."""
+        """Generate all valid actions for a region."""
         region_cell_set = set(region_cells)
         actions_list = []
         for tetromino_type in TetrominoType:
-            for tetromino, shape in self._orientations[tetromino_type.name]:
+            for tetromino, shape in self._orientations.get(tetromino_type.name, []):
                 for anchor_cell in region_cells:
                     anchor_row, anchor_col = anchor_cell
                     offset_row, offset_col = shape[0]
@@ -466,7 +472,7 @@ class Nuruomino(Problem):
 
     def value(self, state):
         filled = sum(
-            self.board.check_region_filled(region_id)
+            state.board.check_region_filled(region_id)
             for region_id in state.board.regions
         )
         penalty = 0
@@ -479,33 +485,19 @@ class Nuruomino(Problem):
         return filled - penalty
 
     def h(self, node):
-        """Optimized heuristic function for informed search."""
+        """Simple heuristic - just count unfilled regions."""
         state = node.state
-        unfilled_regions = state.board.count_regions_not_filled()
-        if unfilled_regions == 0:
-            return 0
-        if unfilled_regions <= 3:
-            components = state.board.count_connected_tetrominos()
-            if components > 1:
-                return unfilled_regions + (components - 1)
-        return unfilled_regions
+        return state.board.count_regions_not_filled()
 
 
 def solve_nuruomino(problem):
-    """Optimized search strategy selection."""
+    """Try multiple strategies if one fails."""
     actual_problem = problem.problem if hasattr(problem, 'problem') else problem
-    num_regions = len(actual_problem.board.regions)
     search_problem = actual_problem if (hasattr(actual_problem, 'on_state') and actual_problem.on_state) else problem
-    four_cell_regions = sum(1 for cells in actual_problem.board.regions.values() if len(cells) == 4)
-    total_cells = sum(len(cells) for cells in actual_problem.board.regions.values())
-    if num_regions <= 5:
-        return astar_search(search_problem, h=actual_problem.h)
-    elif four_cell_regions >= num_regions * 0.7:
-        return astar_search(search_problem, h=actual_problem.h)
-    elif total_cells <= 60:
-        return astar_search(search_problem, h=actual_problem.h)
-    else:
-        return depth_first_graph_search(search_problem)
+    result = depth_first_graph_search(search_problem)
+    if result:
+        return result
+    return astar_search(search_problem, h=actual_problem.h)
 
 if __name__ == "__main__":
     game_board = Board.parse_instance()
