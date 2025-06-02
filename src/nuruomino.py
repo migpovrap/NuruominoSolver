@@ -251,13 +251,13 @@ class Board:
         """Return True if any orthogonally adjacent cells from different regions have the same tetromino type."""
         tetromino_ids = {t.name for t in TetrominoType}
         for row in range(self.size):
-            for col in range(self.board.size):
+            for col in range(self.size):
                 value = self.get_value(row, col)
                 if value in tetromino_ids:
                     for delta_row, delta_col in [(-1, 0), (1, 0), (0, -1), (0, 1)]:
                         neighbor_row = row + delta_row
                         neighbor_col = col + delta_col
-                        if 0 <= neighbor_row < self.board.size and 0 <= neighbor_col < self.board.size:
+                        if 0 <= neighbor_row < self.size and 0 <= neighbor_col < self.size:
                             neighbor_value = self.get_value(neighbor_row, neighbor_col)
                             if neighbor_value == value:
                                 current_region = self.cell_to_region.get((row, col))
