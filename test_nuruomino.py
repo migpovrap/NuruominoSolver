@@ -61,7 +61,7 @@ def run_solver_test(test_number):
             )
 
     except subprocess.TimeoutExpired:
-        return f"Test {test_number:02d}: FAILED - Timeout (>15s)", 15.0
+        return f"Test {test_number:02d}: FAILED - Timeout (>15s)", 0
     except Exception as e:
         return f"Test {test_number:02d}: FAILED - Exception: {str(e)}", 0
 
