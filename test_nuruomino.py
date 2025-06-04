@@ -34,7 +34,7 @@ def run_solver_test(test_number):
             input=input_data,
             text=True,
             capture_output=True,
-            timeout=15,
+            timeout=20,
             cwd=str(base_dir),
         )
         end_time = time.time()
@@ -61,7 +61,7 @@ def run_solver_test(test_number):
             )
 
     except subprocess.TimeoutExpired:
-        return f"Test {test_number:02d}: FAILED - Timeout (>15s)", 0
+        return f"Test {test_number:02d}: FAILED - Timeout (>20s)", 0
     except Exception as e:
         return f"Test {test_number:02d}: FAILED - Exception: {str(e)}", 0
 

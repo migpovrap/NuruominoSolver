@@ -4,10 +4,9 @@ from __future__ import annotations
 # 109686 Miguel Raposo
 # 110632 Inês Costa
 
-from search import Problem, depth_first_tree_search
-from utils import is_in
-import numpy as np
 import sys
+import numpy as np
+from search import Problem, depth_first_tree_search
 
 class Tetromino:
     """Represents a Tetromino with a specific shape, rotation, and reflection."""
@@ -156,13 +155,40 @@ class Board:
             if any(value != action.region for value in adjacent_values):
                 num_contacts += 1
         return num_contacts
+    
+    def _get_cross_adjacent_coordinates(self, row: int, col: int):
+        """Returns the coordinates of the cells adjacent to the given cell."""
+        adjacent_coordinates = []
+        rows, cols = self.board.shape
+        for dr, dc in [(-1,0), (1,0), (0,-1), (0,1)]:
+            new_row, new_col = row + dr, col + dc
+            if 0 <= new_row < rows and 0 <= new_col < cols:
+                adjacent_coordinates.append((new_row, new_col))
+        return adjacent_coordinates
 
     def run_action(self, action: Action) -> Board:
         """Returns a new board with the tetromino placed at the specified position."""
         for r, c in action.position:
             self.board[r, c] = action.tetromino.shape
-        board = Board(self.board)
-        return board
+        return Board(self.board)
+
+    def get_new_adjacent_regions(self, region: int, og_board: 'Board', filled_regions: set) -> set:
+        """Returns the ids of the regions adjacent to the given region."""
+        adjacent_coordinates = set()
+        for row, col in region:
+            coordinates = self._get_cross_adjacent_coordinates(row, col)
+            for coordinate in coordinates:
+                if coordinate not in region:
+                    adjacent_coordinates.add(coordinate)
+        new_adjacent_regions = set()
+        for row, col in adjacent_coordinates:
+            value = self.get_value(row, col)
+            if isinstance(value, int) and value not in filled_regions:
+                new_adjacent_regions.add(value)
+            elif value in Tetromino.TETROMINO_SHAPES:
+                original_value = og_board.get_value(row, col)
+                new_adjacent_regions.add(original_value)
+        return new_adjacent_regions
 
 class Action:
     """Represents placing a Tetromino at a specific location."""
@@ -176,6 +202,7 @@ class Action:
         return (f'Action(region={self.region}, tetromino_shape={self.tetromino.shape}, position={pos_str})')
 
     def is_valid(self, board: Board) -> bool:
+        """Returns whether a action is valid or not."""
         return board.tetromino_fits_in_region(self) and board.num_shared_edges(self) > 0
 
     def is_currently_valid(self, board: Board) -> bool:
@@ -192,7 +219,7 @@ class Action:
         """Check if placing this tetromino would create any 2x2 filled areas, without modifying the board."""
         board_array = board.board
         mask = np.zeros(board_array.shape, dtype=bool)
-        for shape in Tetromino.TETROMINO_SHAPES.keys():
+        for shape in Tetromino.TETROMINO_SHAPES:
             mask |= (board_array == shape)
         rows, cols = zip(*self.position)
         mask[rows, cols] = True
@@ -222,34 +249,32 @@ class Nuruomino(Problem):
         new_state = NuruominoState(
             board=state.board.copy(),
             actions_graph=state.actions_graph.copy(),
-            adjacency_graph={k: v.copy() for k, v in state.adjacency_graph.items()},  # deep copy with keys
+            adjacency_graph={k: v.copy() for k, v in state.adjacency_graph.items()}, # Deep copy with keys
             filled_regions=state.filled_regions.copy()
         )
-        # Update board.
+        # Update baord.
         new_state.board.run_action(action)
         # Update filled regions.
         new_state.add_new_filled_region(action.region)
-        print(new_state.board, "\n")
         # Update adjacency graph.
-        adj_regs = new_state.get_adjacencies(action.region) - state.filled_regions
-        adj_piece_regs = set()
-        weird = new_state.board.get_current_adjacent_regions(action.position, self.og_board, new_state.filled_regions)
-        adj_piece_regs.update(weird)
-        untouched_regions = adj_regs - adj_piece_regs
-        adj_piece_regs -= {action.region}
-        # Remove the region from the adjacency graph.
-        for region in untouched_regions:
-            new_state.adjacency_graph[region].discard(action.region)
-            new_state.adjacency_graph[action.region].discard(region)
+        adj_piece_regs = new_state.board.get_new_adjacent_regions(action.position, self.og_board, new_state.filled_regions)
+        new_state.adjacency_graph[action.region] = adj_piece_regs.copy()
+        for neighbor in adj_piece_regs:
+            if neighbor in new_state.adjacency_graph:
+                new_state.adjacency_graph[neighbor].add(action.region)
+        for region, neighbors in new_state.adjacency_graph.items():
+            if region != action.region and action.region in neighbors and region not in adj_piece_regs:
+                neighbors.discard(action.region)
 
         # Update actions graph.
         new_state.set_actions(action.region, [])
         for region in adj_piece_regs:
-            valid_actions = []
-            for action in new_state.get_actions(region):
-                if action.is_currently_valid(new_state.board):
-                    valid_actions.append(action)
-            new_state.set_actions(region, valid_actions)
+            if region in new_state.actions_graph:
+                valid_actions = []
+                for new_actions in new_state.get_actions(region):
+                    if new_actions.is_currently_valid(new_state.board):
+                        valid_actions.append(new_actions)
+                new_state.set_actions(region, valid_actions)
         return new_state
 
     def goal_test(self, state):
