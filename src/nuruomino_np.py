@@ -107,15 +107,37 @@ class Board:
         """Returns the value of a given cell on the board."""
         return self.board[row, col]
 
-    def get_cross_adjacent_values(self, row: int, col: int):
-        """Returns the values of the cells adjacent to the given cell."""
-        adjacent_values = []
+    def _get_cross_adjacent_coordinates(self, row: int, col: int):
+        """Returns the coordinates of the cells adjacent to the given cell."""
+        adjacent_coords = []
         rows, cols = self.board.shape
         for dr, dc in [(-1,0), (1,0), (0,-1), (0,1)]:
             new_row, new_col = row + dr, col + dc
             if 0 <= new_row < rows and 0 <= new_col < cols:
-                adjacent_values.append(self.get_value(new_row, new_col))
-        return adjacent_values
+                adjacent_coords.append((new_row, new_col))
+        return adjacent_coords
+
+    def get_cross_adjacent_values(self, row: int, col: int):
+        """Returns the values of the cells adjacent to the given cell."""
+        return [self.get_value(r, c) for r, c in self._get_cross_adjacent_coordinates(row, col)]
+
+    def get_current_adjacent_regions(self, region: int, og_board: 'Board', filled_regions: set) -> set:
+        """"""""
+        adjacent_coordinates = set()
+        for row, col in region:
+            coordinates = self._get_cross_adjacent_coordinates(row, col)
+            for coordinate in coordinates:
+                if coordinate not in region:
+                    adjacent_coordinates.add(coordinate)
+        adjacent_filled_regions = set()
+        for row, col in adjacent_coordinates:
+            value = self.get_value(row, col)
+            if type(value) is int and value not in filled_regions:
+                adjacent_filled_regions.add(value)
+            elif value in Tetromino.TETROMINO_SHAPES:
+                original_value = og_board.get_value(row, col)
+                adjacent_filled_regions.add(original_value)
+        return adjacent_filled_regions
 
     def tetromino_fits_in_region(self, action: Action) -> bool:
         """Check if all coordinates in action.position are within the specified region."""
@@ -211,8 +233,8 @@ class Nuruomino(Problem):
         # Update adjacency graph.
         adj_regs = new_state.get_adjacencies(action.region) - state.filled_regions
         adj_piece_regs = set()
-        for row, col in action.position:
-            adj_piece_regs.update(self.og_board.get_cross_adjacent_values(row, col))
+        weird = new_state.board.get_current_adjacent_regions(action.position, self.og_board, new_state.filled_regions)
+        adj_piece_regs.update(weird)
         untouched_regions = adj_regs - adj_piece_regs
         adj_piece_regs -= {action.region}
         # Remove the region from the adjacency graph.
