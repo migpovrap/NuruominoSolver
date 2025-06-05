@@ -46,23 +46,23 @@ class Tetromino:
                 f'reflected={self.reflected}){array_str}')
 
     @staticmethod
-    def normalize(tetromino_array):
+    def normalize(tetromino_array) -> np.matrix:
         """Shift tetromino to top-left corner."""
         rows, cols = np.where(tetromino_array)
         return tetromino_array[rows.min():, cols.min():]
 
     @staticmethod
-    def rotate(tetromino_array, degrees):
+    def rotate(tetromino_array, degrees) -> np.matrix:
         """Rotate a tetromino by the given degrees (must be a multiple of 90)."""
         n = (degrees // 90) % 4
         return Tetromino.normalize(np.rot90(tetromino_array, -n))
 
     @staticmethod
-    def reflect(tetromino_array):
+    def reflect(tetromino_array) -> np.matrix:
         """Applies a vertical reflection."""
         return Tetromino.normalize(np.fliplr(tetromino_array))
 
-    def get(self):
+    def get(self) -> np.matrix:
         """Applies rotation and reflection, returning a set
         of final coordinates for the tetromino."""
         tetromino_array = Tetromino.TETROMINO_SHAPES[self.shape]
@@ -72,7 +72,7 @@ class Tetromino:
         return tetromino_array
 
     @staticmethod
-    def get_all_orientations():
+    def get_all_orientations() -> np.matrix:
         """Returns all unique orientations of Tetromino pieces, normalized."""
         tetrominos_arrays = []
         seen = set()
@@ -102,12 +102,12 @@ class Board:
                 for cell in row) for row in self.board)
 
     @staticmethod
-    def parse_instance():
+    def parse_instance() -> np.matrix:
         """Reads the board from stdin as a numpy matrix
         and returns a Board instance."""
         return Board(np.loadtxt(sys.stdin, dtype=np.int16).astype(object))
 
-    def copy(self):
+    def copy(self) -> Board:
         """Returns a copy of the board."""
         return Board(self.board.copy())
 
@@ -130,8 +130,9 @@ class Board:
 
     def get_cross_adjacent_values(self, row: int, col: int):
         """Returns the values of the cells adjacent to the given cell."""
-        return [self.get_value(r, c)
-                for r, c in self._get_cross_adjacent_coordinates(row, col)]
+        return [self.get_value(adjacent_row, adjacent_col)
+            for adjacent_row, adjacent_col
+                in self._get_cross_adjacent_coordinates(row, col)]
 
     def tetromino_fits_in_region(self, action: Action) -> bool:
         """Check if all coordinates filled in action are within the
@@ -160,7 +161,8 @@ class Board:
             self.board[row, col] = action.tetromino.shape
         return Board(self.board)
 
-    def get_adjacent_regions(self, region: int, og_board: 'Board', filled_regions: set) -> set:
+    def get_adjacent_regions(self, region: list[list[int, int]],
+        og_board: Board, filled_regions: set) -> set:
         """Returns the ids of the regions adjacent to the given region."""
         adjacent_coordinates = set()
         for row, col in region:
@@ -180,53 +182,47 @@ class Board:
 
 class Action:
     """Represents placing a Tetromino at a specific location."""
-    def __init__(self, region:int, tetromino:Tetromino, position:list[tuple[int,int]]):
+    def __init__(self, region:int, tetromino:Tetromino,
+        position:list[list[int,int]]):
         self.region = region
         self.tetromino = tetromino
         self.position = position
 
     def __repr__(self):
-        pos_str = [(int(r), int(c)) for r, c in self.position]
+        position_str = [(int(row), int(col)) for row, col in self.position]
         return (f'Action(region={self.region}, '
                 f'tetromino_shape={self.tetromino.shape}, '
-                f'position={pos_str})')
+                f'position={position_str})')
 
     def is_valid(self, board: Board) -> bool:
         """Returns whether a action is valid or not."""
-        return board.tetromino_fits_in_region(self) and board.num_shared_edges(self) > 0
+        return board.tetromino_fits_in_region(self) and\
+            board.num_shared_edges(self) > 0
 
     def is_currently_valid(self, board: Board, filled_regions, adjacency_graph) -> bool:
         """Check if action doesn't overlap already filled cells, doesn't
         create 2x2 filled cells and doesn't touch pieces with the same shape."""
         if not board.tetromino_fits_in_region(self):
             return False
+        if self._touches_same_tetromino_shape(board):
+            return False
         if not self._connected_to_other_tetromino_shape(board, filled_regions, adjacency_graph):
             return False
-        if self._creates_filled_2x2_or_touches_same_shape(board):
+        if self._creates_filled_2x2_region(board):
             return False
         return True
 
-    def _creates_filled_2x2_or_touches_same_shape(self, board: Board) -> bool:
-        """Efficiently check if placing this tetromino would create any 2x2 filled
-        areas, and check if tetromino touches other tetronimo pieces with the same shape."""
+    def _creates_filled_2x2_region(self, board: Board) -> bool:
+        """Check if placing this tetromino would create
+        any 2x2 filled areas, without modifying the board."""
         board_array = board.board
-        shape = self.tetromino.shape
         tetromino_shapes = set(Tetromino.TETROMINO_SHAPES.keys())
         positions = set(self.position)
-        for row, col in self.position:
-            if row > 0 and board_array[row-1, col] == shape:
-                return True
-            if row < board.size - 1 and board_array[row+1, col] == shape:
-                return True
-            if col > 0 and board_array[row, col-1] == shape:
-                return True
-            if col < board.size - 1 and board_array[row, col+1] == shape:
-                return True
         potencial_2x2_block = set()
         for row, col in self.position:
-            for dr in (0, -1):
-                for dc in (0, -1):
-                    i, j = row + dr, col + dc
+            for row_offset in (0, -1):
+                for col_offset in (0, -1):
+                    i, j = row + row_offset, col + col_offset
                     if 0 <= i < board.size - 1 and 0 <= j < board.size - 1:
                         potencial_2x2_block.add((i, j))
 
@@ -240,9 +236,25 @@ class Action:
                 return True
         return False
 
-    def _connected_to_other_tetromino_shape(self, board: Board, filled_regions, adjacency_graph) -> bool:
-        """When all adjacent regions are filled the tetromino being placed on current region
-        needs to touch a tetromino from one of the adjacent regions."""
+    def _touches_same_tetromino_shape(self, board: Board) -> bool:
+        """Check if tetromino touches other tetronimo pieces with the same shape."""
+        board_array = board.board
+        shape = self.tetromino.shape
+        for row, col in self.position:
+            if row > 0 and board_array[row-1, col] == shape:
+                return True
+            if row < board.size - 1 and board_array[row+1, col] == shape:
+                return True
+            if col > 0 and board_array[row, col-1] == shape:
+                return True
+            if col < board.size - 1 and board_array[row, col+1] == shape:
+                return True
+        return False
+
+    def _connected_to_other_tetromino_shape(self, board: Board, filled_regions,
+        adjacency_graph) -> bool:
+        """When all adjacent regions are filled the tetromino placed on the
+        region needs to touch a tetromino from one of the adjacent regions."""
         adjacent_regions = adjacency_graph.get(self.region, set())
         if not filled_regions.issuperset(adjacent_regions):
             return True
@@ -277,7 +289,8 @@ class Nuruomino(Problem):
         new_state = NuruominoState(
             board=state.board.copy(),
             actions_graph=state.actions_graph.copy(),
-            adjacency_graph={key: value.copy() for key, value in state.adjacency_graph.items()},
+            adjacency_graph={key: value.copy()
+                for key, value in state.adjacency_graph.items()},
             filled_regions=state.filled_regions.copy()
         )
         # Update baord.
@@ -347,17 +360,19 @@ class Nuruomino(Problem):
                 shape_rows, shape_cols = tetromino_array.shape
                 for row in range(self.og_board.size - shape_rows + 1):
                     for col in range(self.og_board.size - shape_cols + 1):
-                        cells = [(row + dr, col + dc)
-                            for dr, dc in zip(*np.where(tetromino_array))]
+                        cells = [(row + row_offset, col + col_offset)
+                            for row_offset, col_offset in zip(*np.where(tetromino_array))]
                         action = Action(region, tetromino, cells)
                         if action.is_valid(self.og_board):
                             all_actions[region].append(action)
         return all_actions
 
     def _select_next_region(self, state):
+        """Selects the next region to explore and test actions."""
         regions = set(state.adjacency_graph.keys())
         regions -= state.filled_regions
-        min_actions = min(len(state.actions_graph.get(region, [])) for region in regions)
+        min_actions = min(len(state.actions_graph.get(region, []))
+            for region in regions)
         min_regions = [region for region in regions
             if len(state.actions_graph.get(region, [])) == min_actions]
 
@@ -398,11 +413,6 @@ class NuruominoState:
     def __lt__(self, other):
         NuruominoState.state_id += 1
         return self.id < other.id
-
-    def remove_region_actions(self, region):
-        """Remove a region from the actions graph."""
-        if region in self.actions_graph:
-            del self.actions_graph[region]
 
 def solve_nuruomino():
     """Parses input from stdin, creates a Nuruomino problem and solves it."""

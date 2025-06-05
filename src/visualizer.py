@@ -5,6 +5,7 @@ from PIL import Image, ImageDraw, ImageFont
 import threading
 import time
 import tempfile
+import xml.etree.ElementTree as ET
 
 from nuruomino import Board, Nuruomino
 from search import depth_first_tree_search, Node
@@ -18,11 +19,12 @@ except ImportError:
 
 
 class FastBatchNuruominoAgent:
-    """Agent that runs at full speed and only captures selected frames."""
+    """Agent that runs at full speed and captures frames from search process or solution."""
 
     def __init__(self, problem, key_frames_only=True, max_frames=None):
         self.problem = problem
         self.all_states = []  # Store all states after fast solve
+        self.sampled_states = []  # Store the actual sampled states for display
         self.current_index = 0
         self.finished = False
         self.solution_found = False
@@ -30,81 +32,161 @@ class FastBatchNuruominoAgent:
         self.key_frames_only = key_frames_only
         self.max_frames = max_frames
         self.original_solution_length = 0  # Track original solution length
+        self.total_search_states = 0  # Track total search states
         self._solve_fast()
 
     def _solve_fast(self):
         """Run the full search at maximum speed, capturing frames based on mode."""
         if self.key_frames_only:
-            print(f"Running fast solve (key frames only, max {self.max_frames or 'all'} frames)...")
+            if self.max_frames:
+                print(f"Running fast solve (capturing search process, sampling {self.max_frames} frames)...")
+            else:
+                print(f"Running fast solve (solution path only)...")
         else:
             print("Running solve with step-by-step capture...")
         
         start_time = time.time()
         
         if self.key_frames_only:
-            # Use your exact same search algorithm at full speed
-            goal_node = depth_first_tree_search(self.problem)
-            solve_time = time.time() - start_time
-            print(f"Fast solve completed in {solve_time:.3f} seconds!")
-            
-            if goal_node:
-                self.solution_found = True
-                # Get the solution path (key frames only)
-                solution_path = goal_node.path()
-                all_solution_states = [node.state for node in solution_path]
-                self.original_solution_length = len(all_solution_states)
-                
-                # Apply frame limiting if specified
-                if self.max_frames and len(all_solution_states) > self.max_frames:
-                    # Smart sampling to get representative frames
-                    self.all_states = self._sample_frames(all_solution_states, self.max_frames)
-                    print(f"Solution found with {self.original_solution_length} total steps, showing {len(self.all_states)} key frames!")
-                else:
-                    self.all_states = all_solution_states
-                    print(f"Solution found with {len(self.all_states)} key steps!")
+            if self.max_frames:
+                # Capture search process and sample frames
+                self._solve_with_search_capture()
             else:
-                print("No solution found")
-                self.all_states = [self.problem.initial]
+                # Just capture solution path (original behavior)
+                self._solve_solution_only()
         else:
             # Step-by-step capture (slower but detailed)
             self._solve_step_by_step()
-            solve_time = time.time() - start_time
-            print(f"Step-by-step solve completed in {solve_time:.3f} seconds!")
             
+        solve_time = time.time() - start_time
+        print(f"Solve completed in {solve_time:.3f} seconds!")
         self.finished = True
 
+    def _solve_solution_only(self):
+        """Solve and capture only the solution path (original key frames behavior)."""
+        goal_node = depth_first_tree_search(self.problem)
+        
+        if goal_node:
+            self.solution_found = True
+            solution_path = goal_node.path()
+            all_solution_states = [node.state for node in solution_path]
+            self.original_solution_length = len(all_solution_states)
+            self.sampled_states = all_solution_states
+            
+            print(f"📊 SOLUTION PATH:")
+            print(f"   • Solution steps: {len(self.sampled_states)}")
+        else:
+            print("No solution found")
+            self.sampled_states = [self.problem.initial]
+        
+        self.all_states = self.sampled_states
+
+    def _solve_with_search_capture(self):
+        """Solve while capturing the entire search process, then sample frames."""
+        frontier = [Node(self.problem.initial)]
+        all_search_states = [self.problem.initial]  # Include initial state
+        goal_node = None
+        
+        while frontier:
+            node = frontier.pop()
+            self.explored_count += 1
+            
+            # Goal test
+            if self.problem.goal_test(node.state):
+                self.solution_found = True
+                goal_node = node
+                break
+                
+            # Expand node
+            try:
+                actions = self.problem.actions(node.state)
+                for action in reversed(actions):
+                    child_state = self.problem.result(node.state, action)
+                    child_node = Node(child_state, node, action)
+                    frontier.append(child_node)
+                    all_search_states.append(child_state)  # Capture every search state
+                    
+            except Exception:
+                pass
+        
+        self.total_search_states = len(all_search_states)
+        
+        if goal_node:
+            solution_path = goal_node.path()
+            self.original_solution_length = len(solution_path)
+        
+        # Sample from the search process
+        if self.max_frames and len(all_search_states) > self.max_frames:
+            self.sampled_states = self._sample_frames(all_search_states, self.max_frames)
+            print(f"📊 SEARCH PROCESS SAMPLING:")
+            print(f"   • Total search states: {self.total_search_states}")
+            print(f"   • Solution length: {self.original_solution_length}")
+            print(f"   • Sampled frames: {len(self.sampled_states)} (from {self.total_search_states} search states)")
+        else:
+            self.sampled_states = all_search_states
+            print(f"📊 SEARCH PROCESS (NO SAMPLING):")
+            print(f"   • Total search states: {len(self.sampled_states)}")
+            print(f"   • Solution length: {self.original_solution_length}")
+        
+        self.all_states = self.sampled_states
+
     def _sample_frames(self, all_states, max_frames):
-        """Smart sampling to get representative frames from the solution path."""
+        """Smart sampling to get representative frames from the search process."""
         if len(all_states) <= max_frames:
             return all_states
         
-        # Always include first and last frames
-        if max_frames < 2:
+        if max_frames < 1:
+            return []
+        
+        if max_frames == 1:
             return [all_states[0]]
         
-        sampled = [all_states[0]]  # Always include initial state
-        remaining_frames = max_frames - 2  # Reserve space for first and last
+        if max_frames == 2:
+            return [all_states[0], all_states[-1]]
         
-        if remaining_frames > 0:
-            # Sample evenly from the middle states
-            middle_states = all_states[1:-1]
-            if middle_states:
-                step = len(middle_states) / remaining_frames
-                for i in range(remaining_frames):
-                    index = int(i * step)
-                    if index < len(middle_states):
-                        sampled.append(middle_states[index])
+        # For 3 or more frames, use intelligent sampling
+        sampled = []
         
-        # Always include final state
+        # Always include first frame
+        sampled.append(all_states[0])
+        
+        # Calculate indices for middle frames
+        if max_frames > 2:
+            middle_frames_count = max_frames - 2  # Reserve first and last
+            if middle_frames_count > 0 and len(all_states) > 2:
+                middle_states = all_states[1:-1]  # Exclude first and last
+                
+                # Create evenly spaced indices
+                if len(middle_states) <= middle_frames_count:
+                    # If we have fewer middle states than requested, take them all
+                    sampled.extend(middle_states)
+                else:
+                    # Sample evenly from middle states
+                    step = (len(middle_states) - 1) / (middle_frames_count - 1) if middle_frames_count > 1 else 0
+                    for i in range(middle_frames_count):
+                        index = int(round(i * step))
+                        if index < len(middle_states):
+                            sampled.append(middle_states[index])
+        
+        # Always include final frame (if different from first)
         if len(all_states) > 1:
             sampled.append(all_states[-1])
         
-        return sampled
+        # Remove any duplicates while preserving order
+        seen = set()
+        final_sampled = []
+        for state in sampled:
+            state_id = id(state)  # Use object identity
+            if state_id not in seen:
+                seen.add(state_id)
+                final_sampled.append(state)
+        return final_sampled
 
     def _solve_step_by_step(self):
         """Solve step-by-step, capturing every explored state."""
         frontier = [Node(self.problem.initial)]
         self.all_states = [self.problem.initial]  # Include initial state
+        self.sampled_states = self.all_states  # Same for step-by-step
         
         while frontier:
             node = frontier.pop()
@@ -126,11 +208,13 @@ class FastBatchNuruominoAgent:
                     
             except Exception:
                 pass
+        
+        self.sampled_states = self.all_states
 
     def step(self):
         """Get the next state in the pre-computed sequence."""
-        if self.current_index < len(self.all_states):
-            state = self.all_states[self.current_index]
+        if self.current_index < len(self.sampled_states):
+            state = self.sampled_states[self.current_index]
             self.current_index += 1
             return state
         return None
@@ -141,27 +225,30 @@ class FastBatchNuruominoAgent:
 
     def get_current_state(self):
         """Get current state."""
-        if self.current_index > 0 and self.current_index <= len(self.all_states):
-            return self.all_states[self.current_index - 1]
+        if self.current_index > 0 and self.current_index <= len(self.sampled_states):
+            return self.sampled_states[self.current_index - 1]
         return self.problem.initial
 
     def get_stats(self):
         """Get search statistics."""
-        if self.key_frames_only and self.max_frames and self.original_solution_length > 0:
-            mode_desc = f'Key Frames ({len(self.all_states)}/{self.original_solution_length} steps)'
+        if self.max_frames and self.total_search_states > 0:
+            mode_desc = f'Sampled Search ({len(self.sampled_states)}/{self.total_search_states} states)'
+        elif self.key_frames_only and not self.max_frames:
+            mode_desc = 'Solution Path Only'
         elif self.key_frames_only:
-            mode_desc = 'Key Frames Only'
+            mode_desc = 'Key Frames'
         else:
             mode_desc = 'Every Step'
             
         return {
             'explored': self.current_index,
-            'frontier_size': max(0, len(self.all_states) - self.current_index),
-            'finished': self.current_index >= len(self.all_states),
+            'frontier_size': max(0, len(self.sampled_states) - self.current_index),
+            'finished': self.current_index >= len(self.sampled_states),
             'solution_found': self.solution_found,
             'depth': self.current_index,
-            'total_steps': len(self.all_states),
+            'total_steps': len(self.sampled_states),
             'original_solution_length': self.original_solution_length,
+            'total_search_states': self.total_search_states,
             'mode': mode_desc
         }
 
@@ -266,8 +353,132 @@ def get_font(size=16):
             return ImageFont.load_default()
 
 
+def board_to_svg(board, adjacency_graph, original_board_data, cell_size=80):
+    """Convert a board state to an SVG string."""
+    rows, cols = board.shape
+    img_width, img_height = cols * cell_size, rows * cell_size
+
+    # Create SVG root element
+    svg = ET.Element('svg', {
+        'width': str(img_width),
+        'height': str(img_height),
+        'viewBox': f'0 0 {img_width} {img_height}',
+        'xmlns': 'http://www.w3.org/2000/svg'
+    })
+
+    # Add styles
+    style = ET.SubElement(svg, 'style')
+    style.text = """
+    .region-text { font-family: Arial, sans-serif; text-anchor: middle; dominant-baseline: central; }
+    .grid-line { stroke: black; stroke-width: 1; }
+    .region-border { stroke: black; stroke-width: 4; fill: none; }
+    """
+
+    color_map = {
+        'L': '#FF6347',   # Red
+        'S': '#3CB371',   # Green
+        'I': '#4169E1',   # Blue
+        'T': '#EE82EE',   # Violet
+    }
+
+    # Background
+    bg_rect = ET.SubElement(svg, 'rect', {
+        'x': '0', 'y': '0',
+        'width': str(img_width),
+        'height': str(img_height),
+        'fill': 'white'
+    })
+
+    # Build region borders
+    region_cells = {}
+    for row in range(rows):
+        for col in range(cols):
+            region = original_board_data[row, col]
+            if isinstance(region, (int, np.integer)):
+                if region not in region_cells:
+                    region_cells[region] = []
+                region_cells[region].append((row, col))
+
+    # Draw region borders
+    for region_id, cells in region_cells.items():
+        region_set = set(cells)
+        for row, col in cells:
+            x0, y0 = col * cell_size, row * cell_size
+            x1, y1 = x0 + cell_size, y0 + cell_size
+            
+            # Check each border direction
+            borders = []
+            if (row - 1, col) not in region_set:  # Top border
+                borders.append(f"M {x0} {y0} L {x1} {y0}")
+            if (row + 1, col) not in region_set:  # Bottom border
+                borders.append(f"M {x0} {y1} L {x1} {y1}")
+            if (row, col - 1) not in region_set:  # Left border
+                borders.append(f"M {x0} {y0} L {x0} {y1}")
+            if (row, col + 1) not in region_set:  # Right border
+                borders.append(f"M {x1} {y0} L {x1} {y1}")
+            
+            for border in borders:
+                border_path = ET.SubElement(svg, 'path', {
+                    'd': border,
+                    'class': 'region-border'
+                })
+
+    # Draw grid
+    for row in range(rows + 1):
+        y = row * cell_size
+        line = ET.SubElement(svg, 'line', {
+            'x1': '0', 'y1': str(y),
+            'x2': str(img_width), 'y2': str(y),
+            'class': 'grid-line'
+        })
+    
+    for col in range(cols + 1):
+        x = col * cell_size
+        line = ET.SubElement(svg, 'line', {
+            'x1': str(x), 'y1': '0',
+            'x2': str(x), 'y2': str(img_height),
+            'class': 'grid-line'
+        })
+
+    # Draw pieces and numbers
+    font_size = int(cell_size * 0.4)
+    for row in range(rows):
+        for col in range(cols):
+            cell = board[row, col]
+            original_region = original_board_data[row, col]
+            x_center, y_center = col * cell_size + cell_size // 2, row * cell_size + cell_size // 2
+
+            # Draw tetromino piece background
+            if isinstance(cell, str) and cell in color_map:
+                color = color_map[cell]
+                padding = cell_size // 10
+                piece_rect = ET.SubElement(svg, 'rect', {
+                    'x': str(col * cell_size + padding),
+                    'y': str(row * cell_size + padding),
+                    'width': str(cell_size - 2 * padding),
+                    'height': str(cell_size - 2 * padding),
+                    'fill': color
+                })
+                text_color = "white"
+            else:
+                text_color = "black"
+
+            # Draw region number
+            if isinstance(original_region, (int, np.integer)):
+                text = ET.SubElement(svg, 'text', {
+                    'x': str(x_center),
+                    'y': str(y_center),
+                    'class': 'region-text',
+                    'font-size': str(font_size),
+                    'fill': text_color
+                })
+                text.text = str(original_region)
+
+    return ET.tostring(svg, encoding='unicode')
+
+
 def board_to_image(board, adjacency_graph, original_board_data, cell_size=80):
-    """Convert a board state to a PIL image."""
+    """Convert a board state to a PIL image (for Flet compatibility)."""
     rows, cols = board.shape
     img_width, img_height = cols * cell_size, rows * cell_size
 
@@ -348,8 +559,12 @@ def board_to_image(board, adjacency_graph, original_board_data, cell_size=80):
 def solve_and_save_gif(problem, original_board_data, test_name, images_dir, cell_size=80, key_frames_only=True, max_frames=None):
     """Generate GIF using the selected agent mode."""
     if key_frames_only:
-        mode_str = f"key_frames_{max_frames}" if max_frames else "key_frames_all"
-        print(f"Solving puzzle for GIF (key frames, max {max_frames or 'all'})...")
+        if max_frames:
+            mode_str = f"sampled_{max_frames}"
+            print(f"Solving puzzle for GIF (search process, {max_frames} sampled frames)...")
+        else:
+            mode_str = "solution_path"
+            print(f"Solving puzzle for GIF (solution path only)...")
     else:
         mode_str = "every_step"
         print(f"Solving puzzle for GIF (every step)...")
@@ -360,16 +575,16 @@ def solve_and_save_gif(problem, original_board_data, test_name, images_dir, cell
         print("No solution found, cannot generate GIF.")
         return
     
-    print(f"Generating frames for {len(agent.all_states)} states...")
+    print(f"Generating frames for {len(agent.sampled_states)} states...")
     frames = []
     
-    for i, state in enumerate(agent.all_states):
+    for i, state in enumerate(agent.sampled_states):
         img = board_to_image(state.board.board, state.adjacency_graph, 
                            original_board_data, cell_size)
         frames.append(img)
         
-        if (i + 1) % 5 == 0:
-            print(f"Generated frame {i + 1}/{len(agent.all_states)}")
+        if (i + 1) % 50 == 0:
+            print(f"Generated frame {i + 1}/{len(agent.sampled_states)}")
 
     if frames:
         gif_path = os.path.join(images_dir, f"{test_name}_solution_{mode_str}.gif")
@@ -379,7 +594,7 @@ def solve_and_save_gif(problem, original_board_data, test_name, images_dir, cell
             frames.append(frames[-1].copy())
         
         try:
-            duration = 400 if key_frames_only and max_frames and max_frames <= 10 else (200 if key_frames_only else 100)
+            duration = 100 if max_frames and max_frames > 50 else (200 if key_frames_only else 100)
             frames[0].save(gif_path, save_all=True, append_images=frames[1:], 
                           duration=duration, loop=0)
             print(f"GIF saved to {gif_path}")
@@ -387,6 +602,46 @@ def solve_and_save_gif(problem, original_board_data, test_name, images_dir, cell
             
         except Exception as e:
             print(f"Error saving GIF: {e}")
+
+
+def solve_and_save_svg_sequence(problem, original_board_data, test_name, images_dir, cell_size=80, key_frames_only=True, max_frames=None):
+    """Generate SVG sequence using the selected agent mode."""
+    if key_frames_only:
+        if max_frames:
+            mode_str = f"sampled_{max_frames}"
+            print(f"Solving puzzle for SVG sequence (search process, {max_frames} sampled frames)...")
+        else:
+            mode_str = "solution_path"
+            print(f"Solving puzzle for SVG sequence (solution path only)...")
+    else:
+        mode_str = "every_step"
+        print(f"Solving puzzle for SVG sequence (every step)...")
+    
+    agent = FastBatchNuruominoAgent(problem, key_frames_only, max_frames)
+    
+    if not agent.solution_found:
+        print("No solution found, cannot generate SVG sequence.")
+        return
+    
+    print(f"Generating SVG files for {len(agent.sampled_states)} states...")
+    
+    # Create a subdirectory for the SVG sequence
+    svg_dir = os.path.join(images_dir, f"{test_name}_{mode_str}_svg")
+    os.makedirs(svg_dir, exist_ok=True)
+    
+    for i, state in enumerate(agent.sampled_states):
+        svg_content = board_to_svg(state.board.board, state.adjacency_graph, 
+                                 original_board_data, cell_size)
+        
+        svg_path = os.path.join(svg_dir, f"frame_{i:04d}.svg")
+        with open(svg_path, 'w', encoding='utf-8') as f:
+            f.write(svg_content)
+        
+        if (i + 1) % 50 == 0:
+            print(f"Generated SVG {i + 1}/{len(agent.sampled_states)}")
+    
+    print(f"SVG sequence saved to {svg_dir}")
+    print(f"Generated {len(agent.sampled_states)} SVG files")
 
 
 # Flet-based realtime visualizer
@@ -441,9 +696,9 @@ if FLET_AVAILABLE:
             
         def _pre_generate_frames(self):
             """Pre-generate all frames for batch mode."""
-            print(f"Generating {len(self.agent.all_states)} frames for visualization...")
+            print(f"Generating {len(self.agent.sampled_states)} frames for visualization...")
             
-            for i, state in enumerate(self.agent.all_states):
+            for i, state in enumerate(self.agent.sampled_states):
                 img = board_to_image(
                     state.board.board,
                     state.adjacency_graph,
@@ -453,8 +708,8 @@ if FLET_AVAILABLE:
                 frame_path = self.save_frame_to_file(img, i + 1)  # +1 because frame 0 is initial
                 self.frames.append(frame_path)
                 
-                if (i + 1) % 5 == 0:
-                    print(f"Generated frame {i + 1}/{len(self.agent.all_states)}")
+                if (i + 1) % 50 == 0:
+                    print(f"Generated frame {i + 1}/{len(self.agent.sampled_states)}")
             
             print("All frames generated! Ready for visualization.")
             
@@ -468,7 +723,7 @@ if FLET_AVAILABLE:
                     new_size = (int(pil_image.size[0] * ratio), int(pil_image.size[1] * ratio))
                     pil_image = pil_image.resize(new_size, Image.Resampling.LANCZOS)
                 
-                # Save as PNG file
+                # Save as PNG file (for Flet compatibility)
                 file_path = os.path.join(self.temp_dir, f"frame_{frame_num:04d}.png")
                 pil_image.save(file_path, "PNG", optimize=True)
                 return file_path
@@ -486,20 +741,29 @@ if FLET_AVAILABLE:
         def build_ui(self, page: ft.Page):
             """Build the Flet UI."""
             self.page = page
-            mode_title = f"Key Frames ({self.max_frames})" if self.key_frames_only and self.max_frames else ("Key Frames" if self.key_frames_only else "Every Step")
-            page.title = f"Nuruomino Solver - {mode_title} Mode"
+            
+            # Determine mode description
+            if self.key_frames_only:
+                if self.max_frames:
+                    mode_title = f"Sampled Search ({self.max_frames})"
+                else:
+                    mode_title = "Solution Path"
+            else:
+                mode_title = "Every Step"
+                
+            page.title = f"Nuruomino Solver - {mode_title}"
             page.theme_mode = ft.ThemeMode.LIGHT
             page.padding = 20
             page.window.width = 1400
             page.window.height = 900
             
-            # Mode indicator
+            # Mode indicator with better explanation
             mode_color = "green" if self.key_frames_only else "blue"
             if self.key_frames_only:
                 if self.max_frames:
-                    mode_desc = f"🚀 INSTANT SOLVE + {len(self.agent.all_states)} Key Steps (from {self.agent.original_solution_length} total)"
+                    mode_desc = f"🎯 SEARCH SAMPLING: {len(self.agent.sampled_states)} frames from {self.agent.total_search_states} search states"
                 else:
-                    mode_desc = "🚀 INSTANT SOLVE + All Solution Steps"
+                    mode_desc = f"🚀 SOLUTION PATH: {len(self.agent.sampled_states)} solution steps"
             else:
                 mode_desc = "🔍 Real-time Step-by-Step Generation"
             
@@ -531,8 +795,15 @@ if FLET_AVAILABLE:
             )
             
             # Control buttons
-            play_text = "Play Solution" if self.key_frames_only else "Play"
-            button_color = "green" if (self.key_frames_only and hasattr(self.agent, 'solution_found') and self.agent.solution_found) else "blue"
+            if self.key_frames_only and self.max_frames:
+                play_text = "Play Search Sample"
+                button_color = "orange"
+            elif self.key_frames_only:
+                play_text = "Play Solution"
+                button_color = "green"
+            else:
+                play_text = "Play"
+                button_color = "blue"
             
             self.play_button = ft.ElevatedButton(
                 play_text,
@@ -584,7 +855,13 @@ if FLET_AVAILABLE:
                 on_change=self.on_frame_change
             )
             
-            frame_label = "Solution Step" if self.key_frames_only else "Search Step"
+            if self.key_frames_only and self.max_frames:
+                frame_label = "Search Frame"
+            elif self.key_frames_only:
+                frame_label = "Solution Step"
+            else:
+                frame_label = "Search Step"
+            
             self.frame_counter_text = ft.Text(f"{frame_label}: 1/{len(self.frames)}")
             
             # Speed control
@@ -674,7 +951,14 @@ if FLET_AVAILABLE:
                 return
                 
             self.is_playing = not self.is_playing
-            play_text = "Pause" if self.is_playing else ("Play Solution" if self.key_frames_only else "Play")
+            
+            if self.key_frames_only and self.max_frames:
+                play_text = "Pause" if self.is_playing else "Play Search Sample"
+            elif self.key_frames_only:
+                play_text = "Pause" if self.is_playing else "Play Solution"
+            else:
+                play_text = "Pause" if self.is_playing else "Play"
+                
             self.play_button.text = play_text
             self.play_button.icon = "pause" if self.is_playing else "play_arrow"
             self.page.update()
@@ -691,7 +975,13 @@ if FLET_AVAILABLE:
             
             if self.current_frame >= len(self.frames) - 1:
                 self.is_playing = False
-                play_text = "Play Solution" if self.key_frames_only else "Play"
+                if self.key_frames_only and self.max_frames:
+                    play_text = "Play Search Sample"
+                elif self.key_frames_only:
+                    play_text = "Play Solution"
+                else:
+                    play_text = "Play"
+                    
                 self.play_button.text = play_text
                 self.play_button.icon = "play_arrow"
                 self.page.update()
@@ -803,7 +1093,13 @@ if FLET_AVAILABLE:
                 self.frame_slider.max = max(1, len(self.frames) - 1)
                 self.frame_slider.value = self.current_frame
                 
-                frame_label = "Solution Step" if self.key_frames_only else "Search Step"
+                if self.key_frames_only and self.max_frames:
+                    frame_label = "Search Frame"
+                elif self.key_frames_only:
+                    frame_label = "Solution Step"
+                else:
+                    frame_label = "Search Step"
+                    
                 self.frame_counter_text.value = f"{frame_label}: {self.current_frame + 1}/{len(self.frames)}"
                 
                 # Update statistics
@@ -823,8 +1119,8 @@ if FLET_AVAILABLE:
             
             if self.key_frames_only:
                 # Show current frame index, not the state index
-                if self.current_frame < len(self.agent.all_states):
-                    current_state = self.agent.all_states[self.current_frame]
+                if self.current_frame < len(self.agent.sampled_states):
+                    current_state = self.agent.sampled_states[self.current_frame]
                     unfilled = len(self.problem.regions) - len(current_state.filled_regions)
                 else:
                     unfilled = 0
@@ -836,31 +1132,40 @@ if FLET_AVAILABLE:
                     status += " ✓" if self.agent.solution_found else " ✗"
                 unfilled = len(self.problem.regions) - len(current_state.filled_regions) if current_state else len(self.problem.regions)
             
-            # Show both sampled frames and original solution length
+            # Show frame information
             total_frames_text = f"{len(self.frames)}"
-            if self.key_frames_only and self.agent.original_solution_length > 0:
-                total_frames_text += f" (sampled from {self.agent.original_solution_length})"
+            if self.key_frames_only and self.agent.total_search_states > 0:
+                if self.max_frames:
+                    total_frames_text += f" (sampled from {self.agent.total_search_states} search states)"
+                else:
+                    total_frames_text += f" (solution path)"
             
-            return f"""Status: {status}
+            result = f"""Status: {status}
 Mode: {stats.get('mode', 'Unknown')}
 Total Frames: {total_frames_text}
 Current Frame: {self.current_frame + 1}
 Unfilled Regions: {unfilled}
 Total Regions: {len(self.problem.regions)}"""
+
+            if self.agent.original_solution_length > 0:
+                result += f"\nSolution Length: {self.agent.original_solution_length}"
+                
+            return result
         
         def get_debug_text(self):
             """Get formatted debug information."""
             if self.key_frames_only:
-                # Fix the indexing issue here
-                if self.current_frame >= len(self.agent.all_states):
+                # Use sampled_states instead of all_states for proper indexing
+                if self.current_frame >= len(self.agent.sampled_states):
                     return "No state data available"
                 
-                state = self.agent.all_states[self.current_frame]
-                debug_info = f"=== SOLUTION STEP {self.current_frame + 1} ===\n"
+                state = self.agent.sampled_states[self.current_frame]
                 
-                # Show sampling info if frames are limited
-                if self.agent.original_solution_length > len(self.agent.all_states):
-                    debug_info += f"(Sampled frame from {self.agent.original_solution_length} total steps)\n"
+                if self.max_frames:
+                    debug_info = f"=== SEARCH FRAME {self.current_frame + 1} ===\n"
+                    debug_info += f"(Sampled from {self.agent.total_search_states} total search states)\n"
+                else:
+                    debug_info = f"=== SOLUTION STEP {self.current_frame + 1} ===\n"
                 
             else:
                 if not self.agent.current_node:
@@ -920,19 +1225,21 @@ else:
         print("   pip install flet")
         print("\nAlternatively, you can:")
         print("   • Generate a GIF: python src/visualizer.py input.txt --gif [--every-step] [--frames N]")
+        print("   • Generate SVG sequence: python src/visualizer.py input.txt --svg [--every-step] [--frames N]")
         print("   • Generate static images: python src/visualizer.py input.txt output.txt")
         print()
 
 
 def main():
     """Main entry point."""
-    parser = argparse.ArgumentParser(description="Nuruomino visualizer with mode selection")
+    parser = argparse.ArgumentParser(description="Nuruomino visualizer with improved frame sampling")
     parser.add_argument("input_file", help="Input board file")
     parser.add_argument("output_file", nargs='?', help="Output board file")
     parser.add_argument("--gif", action="store_true", help="Generate GIF")
+    parser.add_argument("--svg", action="store_true", help="Generate SVG sequence")
     parser.add_argument("--realtime", action="store_true", help="Interactive realtime mode (requires Flet)")
-    parser.add_argument("--every-step", action="store_true", help="Capture every step instead of just key frames (slower but more detailed)")
-    parser.add_argument("--frames", type=int, help="Maximum number of frames to capture in key frames mode (default: all solution steps)")
+    parser.add_argument("--every-step", action="store_true", help="Capture every step instead of sampling (slower but complete)")
+    parser.add_argument("--frames", type=int, help="Number of frames to sample from search process (default: show solution path only)")
     parser.add_argument("--cell-size", type=int, default=80, help="Cell size in pixels (default: 80)")
     args = parser.parse_args()
 
@@ -962,17 +1269,17 @@ def main():
         if FLET_AVAILABLE:
             if key_frames_only:
                 if max_frames:
-                    mode_desc = f"Key Frames (max {max_frames})"
+                    mode_desc = f"Search Sampling ({max_frames} frames)"
                     print(f"Using Interactive Visualization - {mode_desc}")
-                    print(f"Your algorithm will solve instantly, then show up to {max_frames} key solution steps!")
+                    print(f"Will sample {max_frames} frames from the entire search process (~3000 states)!")
                 else:
-                    mode_desc = "Key Frames (all steps)"
+                    mode_desc = "Solution Path Only"
                     print(f"Using Interactive Visualization - {mode_desc}")
-                    print("Your algorithm will solve instantly, then show all solution steps!")
+                    print("Will show only the solution steps (fast solve, solution path only)")
             else:
-                mode_desc = "Every Step (Detailed)"
+                mode_desc = "Every Step (Complete)"
                 print(f"Using Interactive Visualization - {mode_desc}")
-                print("Will capture every search step in real-time (slower but detailed)")
+                print("Will capture every search step in real-time (slower but complete)")
             run_realtime_visualizer(problem, original_board_data, args.cell_size, key_frames_only, max_frames)
         else:
             run_realtime_visualizer(problem, original_board_data, args.cell_size, key_frames_only, max_frames)
@@ -981,27 +1288,32 @@ def main():
         # Generate GIF
         solve_and_save_gif(problem, original_board_data, test_name, images_dir, args.cell_size, key_frames_only, max_frames)
         
+    elif args.svg:
+        # Generate SVG sequence
+        solve_and_save_svg_sequence(problem, original_board_data, test_name, images_dir, args.cell_size, key_frames_only, max_frames)
+        
     else:
         # Static mode
-        image = board_to_image(nuruomino_board.board, problem.current_state.adjacency_graph, 
-                             original_board_data, args.cell_size)
-        
         if args.output_file:
             solution_board = parse_solution_board(args.output_file)
-            image = board_to_image(solution_board.board, problem.current_state.adjacency_graph, 
-                                 original_board_data, args.cell_size)
+            svg_content = board_to_svg(solution_board.board, problem.current_state.adjacency_graph, 
+                                     original_board_data, args.cell_size)
+            svg_path = os.path.join(images_dir, f"{test_name}_solved.svg")
+            with open(svg_path, 'w', encoding='utf-8') as f:
+                f.write(svg_content)
+            print(f"Solution SVG saved to {svg_path}")
         else:
             goal_node = depth_first_tree_search(problem)
             if goal_node:
-                image = board_to_image(goal_node.state.board.board, goal_node.state.adjacency_graph, 
-                                     original_board_data, args.cell_size)
+                svg_content = board_to_svg(goal_node.state.board.board, goal_node.state.adjacency_graph, 
+                                         original_board_data, args.cell_size)
+                svg_path = os.path.join(images_dir, f"{test_name}_solved.svg")
+                with open(svg_path, 'w', encoding='utf-8') as f:
+                    f.write(svg_content)
+                print(f"Solution SVG saved to {svg_path}")
                 print("Solution found!")
             else:
                 print("No solution found.")
-        
-        image_path = os.path.join(images_dir, f"{test_name}_solved.png")
-        image.save(image_path)
-        image.show()
 
 
 if __name__ == "__main__":

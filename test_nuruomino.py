@@ -30,7 +30,7 @@ def run_solver_test(test_number):
         # Run the simplified solver with timing
         start_time = time.time()
         result = subprocess.run(
-            [sys.executable, str(base_dir / "src/nuruomino_np.py")],
+            [sys.executable, str(base_dir / "src/nuruomino.py")],
             input=input_data,
             text=True,
             capture_output=True,
