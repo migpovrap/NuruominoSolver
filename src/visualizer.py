@@ -44,9 +44,9 @@ class FastBatchNuruominoAgent:
                 print(f"Running fast solve (solution path only)...")
         else:
             print("Running solve with step-by-step capture...")
-        
+
         start_time = time.time()
-        
+
         if self.key_frames_only:
             if self.max_frames:
                 # Capture search process and sample frames
@@ -264,6 +264,8 @@ class OptimizedInteractiveNuruominoAgent:
         self.finished = False
         self.solution_found = False
         self.explored_count = 0
+        self.original_solution_length = 0  # FIXED: Add missing attribute
+        self.total_search_states = 0       # FIXED: Add this too for consistency
 
     def step(self):
         """Single step that mirrors depth_first_tree_search exactly."""
@@ -279,6 +281,7 @@ class OptimizedInteractiveNuruominoAgent:
             self.solution_found = True
             self.finished = True
             self.solution_path = node.path()
+            self.original_solution_length = len(self.solution_path)  # FIXED: Set solution length
             return node.state
             
         try:
@@ -300,6 +303,7 @@ class OptimizedInteractiveNuruominoAgent:
         self.finished = False
         self.solution_found = False
         self.explored_count = 0
+        self.original_solution_length = 0  # FIXED: Reset this too
 
     def get_current_state(self):
         """Get current state."""
@@ -477,23 +481,23 @@ def board_to_svg(board, adjacency_graph, original_board_data, cell_size=80):
     return ET.tostring(svg, encoding='unicode')
 
 
-def board_to_image(board, adjacency_graph, original_board_data, cell_size=80):
-    """Convert a board state to a PIL image (for Flet compatibility)."""
+def draw_edge(row: int, col: int, coords, region_set, draw):
+    """Draw a thick border if the neighboring cell is not in the same region."""
+    if (row, col) not in region_set:
+        x0, y0, x1, y1 = coords
+        draw.line([(x0, y0), (x1, y1)], fill="black", width=4)
+
+def board_to_image(board, adjacency_graph, original_board_data, cell_size=40, show_region_numbers=False):
+    """Draw the board as a PIL image with thick region borders and fixed colored pieces."""
     rows, cols = board.shape
-    img_width, img_height = cols * cell_size, rows * cell_size
+    img_width = cols * cell_size
+    img_height = rows * cell_size
+    border_width = 8
 
     image = Image.new("RGB", (img_width, img_height), "white")
     draw = ImageDraw.Draw(image)
-    font = get_font(int(cell_size * 0.4))
 
-    color_map = {
-        'L': (255, 99, 71),   # Red
-        'S': (60, 179, 113),  # Green
-        'I': (65, 105, 225),  # Blue
-        'T': (238, 130, 238), # Violet
-    }
-
-    # Build region borders
+    # Build region cells
     region_cells = {}
     for row in range(rows):
         for col in range(cols):
@@ -504,59 +508,70 @@ def board_to_image(board, adjacency_graph, original_board_data, cell_size=80):
                 region_cells[region].append((row, col))
 
     # Draw region borders
-    border_width = max(4, cell_size // 10)
-    for region_id, cells in region_cells.items():
+    for _, cells in region_cells.items():
         region_set = set(cells)
         for row, col in cells:
             x0, y0 = col * cell_size, row * cell_size
             x1, y1 = x0 + cell_size, y0 + cell_size
-            for dr, dc, coords in [(-1, 0, [x0, y0, x1, y0]), (1, 0, [x0, y1, x1, y1]),
-                                   (0, -1, [x0, y0, x0, y1]), (0, 1, [x1, y0, x1, y1])]:
-                if (row + dr, col + dc) not in region_set:
-                    draw.line(coords, fill="black", width=border_width)
+            draw_edge(row - 1, col, [x0, y0, x1, y0], region_set, draw)
+            draw_edge(row + 1, col, [x0, y1, x1, y1], region_set, draw)
+            draw_edge(row, col - 1, [x0, y0, x0, y1], region_set, draw)
+            draw_edge(row, col + 1, [x1, y0, x1, y1], region_set, draw)
 
-    # Draw grid
-    grid_width = max(1, cell_size // 20)
+    # Draw thick outer border
     for row in range(rows + 1):
         y = row * cell_size
-        draw.line([(0, y), (img_width, y)], fill="black", width=grid_width)
+        width = border_width if row == 0 or row == rows else 1
+        if row == rows:
+            y -= border_width // 4
+        draw.line([(0, y), (img_width, y)], fill="black", width=width)
+
     for col in range(cols + 1):
         x = col * cell_size
-        draw.line([(x, 0), (x, img_height)], fill="black", width=grid_width)
+        width = border_width if col == 0 or col == cols else 1
+        if col == cols:
+            x -= border_width // 4
+        draw.line([(x, 0), (x, img_height)], fill="black", width=width)
 
-    # Draw pieces and numbers
-    for row in range(rows):
-        for col in range(cols):
-            cell = board[row, col]
-            original_region = original_board_data[row, col]
-            x_center, y_center = col * cell_size + cell_size // 2, row * cell_size + cell_size // 2
+    # Fixed color map for tetrominoes
+    color_map = {
+        'L': (255, 99, 71),   # Red
+        'S': (60, 179, 113),  # Green
+        'I': (65, 105, 225),  # Blue
+        'T': (238, 130, 238), # Violet
+    }
 
-            if isinstance(cell, str) and cell in color_map:
-                color = color_map[cell]
-                padding = cell_size // 10
-                draw.rectangle([col * cell_size + padding, row * cell_size + padding,
-                               (col + 1) * cell_size - padding, (row + 1) * cell_size - padding], 
-                               fill=color)
-                text_color = "white"
-            else:
-                text_color = "black"
+    # Draw colored pieces
+    padding = 4
+    for row_idx, row in enumerate(board):
+        for col_idx, cell in enumerate(row):
+            if cell not in color_map:
+                continue
+            color = color_map[cell]
+            x0 = col_idx * cell_size + padding
+            y0 = row_idx * cell_size + padding
+            x1 = (col_idx + 1) * cell_size - padding
+            y1 = (row_idx + 1) * cell_size - padding
+            draw.rectangle([x0, y0, x1, y1], fill=color)
 
-            if isinstance(original_region, (int, np.integer)):
-                text = str(original_region)
-                try:
+    # Draw region numbers if requested
+    if show_region_numbers:
+        font = get_font(size=int(cell_size * 0.4))
+        for row in range(rows):
+            for col in range(cols):
+                region = original_board_data[row, col]
+                if isinstance(region, (int, np.integer)):
+                    x_center = col * cell_size + cell_size // 2
+                    y_center = row * cell_size + cell_size // 2
+                    text = str(region)
                     bbox = draw.textbbox((0, 0), text, font=font)
-                    text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
-                except:
-                    text_width, text_height = len(text) * (cell_size // 5), cell_size // 3
-
-                text_x = x_center - text_width // 2
-                text_y = y_center - text_height // 2
-                draw.text((text_x, text_y), text, fill=text_color, font=font)
+                    w, h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+                    draw.text((x_center - w // 2, y_center - h // 2), text, fill="black", font=font)
 
     return image
 
 
-def solve_and_save_gif(problem, original_board_data, test_name, images_dir, cell_size=80, key_frames_only=True, max_frames=None):
+def solve_and_save_gif(problem, original_board_data, test_name, images_dir, cell_size=80, key_frames_only=True, max_frames=None, show_region_numbers=False):
     """Generate GIF using the selected agent mode."""
     if key_frames_only:
         if max_frames:
@@ -580,7 +595,7 @@ def solve_and_save_gif(problem, original_board_data, test_name, images_dir, cell
     
     for i, state in enumerate(agent.sampled_states):
         img = board_to_image(state.board.board, state.adjacency_graph, 
-                           original_board_data, cell_size)
+                           original_board_data, cell_size, show_region_numbers=show_region_numbers)
         frames.append(img)
         
         if (i + 1) % 50 == 0:
@@ -661,6 +676,7 @@ if FLET_AVAILABLE:
             
             # State management
             self.frames = []
+            self.debug_info_cache = []  # ADDED: Store debug info for each frame
             self.current_frame = 0
             self.is_playing = False
             self.speed = 1.0
@@ -674,6 +690,10 @@ if FLET_AVAILABLE:
             )
             initial_path = self.save_frame_to_file(initial_img, 0)
             self.frames.append(initial_path)
+            
+            # Generate and store initial debug info
+            initial_debug = self._generate_debug_info_for_state(problem.initial, 0, is_initial=True)
+            self.debug_info_cache.append(initial_debug)
             
             # Create appropriate agent based on mode
             if key_frames_only:
@@ -708,10 +728,85 @@ if FLET_AVAILABLE:
                 frame_path = self.save_frame_to_file(img, i + 1)  # +1 because frame 0 is initial
                 self.frames.append(frame_path)
                 
+                # ADDED: Generate and store debug info for this frame
+                debug_info = self._generate_debug_info_for_state(state, i + 1)
+                self.debug_info_cache.append(debug_info)
+                
                 if (i + 1) % 50 == 0:
                     print(f"Generated frame {i + 1}/{len(self.agent.sampled_states)}")
             
             print("All frames generated! Ready for visualization.")
+
+        def _generate_debug_info_for_state(self, state, frame_number, is_initial=False):
+            """Generate debug information for a specific state and store it."""
+            if is_initial:
+                debug_info = f"=== INITIAL STATE ===\n"
+            elif self.key_frames_only:
+                if self.max_frames:
+                    debug_info = f"=== SEARCH FRAME {frame_number} ===\n"
+                    debug_info += f"(Sampled from {self.agent.total_search_states} total search states)\n"
+                else:
+                    debug_info = f"=== SOLUTION STEP {frame_number} ===\n"
+            else:
+                debug_info = f"=== SEARCH STEP {frame_number} ===\n"
+            
+            debug_info += f"Filled Regions: {sorted(state.filled_regions)}\n\n"
+            
+            debug_info += f"=== ADJACENCY GRAPH ===\n"
+            for region, neighbors in sorted(state.adjacency_graph.items()):
+                debug_info += f"Region {region}: {sorted(neighbors)}\n"
+            
+            debug_info += f"\n=== REMAINING REGIONS ===\n"
+            unfilled_regions = set(state.adjacency_graph.keys()) - state.filled_regions
+            
+            if not unfilled_regions:
+                debug_info += "All regions filled! (Goal state)\n"
+            else:
+                try:
+                    # Get actions for each unfilled region directly from the state's actions_graph
+                    total_actions = 0
+                    for region in sorted(unfilled_regions):
+                        # Get actions directly from the state's actions_graph
+                        region_actions = state.actions_graph.get(region, [])
+                        
+                        # Filter actions that are currently valid
+                        valid_actions = []
+                        for action in region_actions:
+                            try:
+                                if action.is_currently_valid(state.board, state.filled_regions, state.adjacency_graph):
+                                    valid_actions.append(action)
+                            except:
+                                # Skip invalid actions
+                                continue
+                        
+                        action_count = len(valid_actions)
+                        total_actions += action_count
+                        debug_info += f"Region {region}: {action_count} possible actions\n"
+                        
+                        if action_count > 0:
+                            for action in valid_actions:
+                                pos_str = ", ".join(f"({row},{col})" for row, col in action.position)
+                                debug_info += f"  • {action.tetromino.shape} at {pos_str}\n"
+                        elif region in unfilled_regions:
+                            debug_info += "  • No valid actions (dead end)\n"
+
+                        debug_info += "\n"  # Add spacing between regions
+                    
+                    debug_info += f"Total available actions: {total_actions}\n"
+                    
+                except Exception as e:
+                    debug_info += f"Error analyzing actions: {str(e)}\n"
+                    debug_info += f"Error type: {type(e).__name__}\n\n"
+                    
+                    # Fallback: just show which regions are unfilled
+                    debug_info += "Fallback - Unfilled regions list:\n"
+                    for region in sorted(unfilled_regions):
+                        debug_info += f"Region {region}: Analysis failed\n"
+            
+            debug_info += f"\n=== BOARD STATE ===\n"
+            debug_info += str(state.board)
+            
+            return debug_info
             
         def save_frame_to_file(self, pil_image, frame_num):
             """Save PIL image to a temporary file and return the path."""
@@ -761,11 +856,11 @@ if FLET_AVAILABLE:
             mode_color = "green" if self.key_frames_only else "blue"
             if self.key_frames_only:
                 if self.max_frames:
-                    mode_desc = f"🎯 SEARCH SAMPLING: {len(self.agent.sampled_states)} frames from {self.agent.total_search_states} search states"
+                    mode_desc = f"SEARCH SAMPLING: {len(self.agent.sampled_states)} frames from {self.agent.total_search_states} search states"
                 else:
-                    mode_desc = f"🚀 SOLUTION PATH: {len(self.agent.sampled_states)} solution steps"
+                    mode_desc = f"SOLUTION PATH: {len(self.agent.sampled_states)} solution steps"
             else:
-                mode_desc = "🔍 Real-time Step-by-Step Generation"
+                mode_desc = "Real-time Step-by-Step Generation"
             
             self.mode_text = ft.Text(
                 mode_desc,
@@ -1017,7 +1112,7 @@ if FLET_AVAILABLE:
                 # For real-time mode, restart the search
                 self.agent.reset()
                 
-                # Clear existing frames
+                # Clear existing frames and debug info
                 for frame_path in self.frames[1:]:  # Keep initial frame
                     try:
                         if os.path.exists(frame_path):
@@ -1026,6 +1121,7 @@ if FLET_AVAILABLE:
                         pass
                 
                 self.frames = self.frames[:1]  # Keep only initial frame
+                self.debug_info_cache = self.debug_info_cache[:1]  # ADDED: Keep only initial debug info
                 self.current_frame = 0
                 self.is_playing = False
                 self.generation_complete = False
@@ -1048,6 +1144,11 @@ if FLET_AVAILABLE:
                 )
                 frame_path = self.save_frame_to_file(img, len(self.frames))
                 self.frames.append(frame_path)
+                
+                # ADDED: Generate and store debug info for this new frame
+                debug_info = self._generate_debug_info_for_state(state, len(self.frames))
+                self.debug_info_cache.append(debug_info)
+                
                 self.update_ui()
                 return True
             return False
@@ -1124,7 +1225,7 @@ if FLET_AVAILABLE:
                     unfilled = len(self.problem.regions) - len(current_state.filled_regions)
                 else:
                     unfilled = 0
-                status = "✅ Solution Found!" if self.agent.solution_found else "❌ No Solution"
+                status = "Solution Found!" if self.agent.solution_found else "No Solution"
             else:
                 current_state = self.agent.get_current_state()
                 status = "Finished" if self.agent.finished else "Running"
@@ -1153,46 +1254,12 @@ Total Regions: {len(self.problem.regions)}"""
             return result
         
         def get_debug_text(self):
-            """Get formatted debug information."""
-            if self.key_frames_only:
-                # Use sampled_states instead of all_states for proper indexing
-                if self.current_frame >= len(self.agent.sampled_states):
-                    return "No state data available"
-                
-                state = self.agent.sampled_states[self.current_frame]
-                
-                if self.max_frames:
-                    debug_info = f"=== SEARCH FRAME {self.current_frame + 1} ===\n"
-                    debug_info += f"(Sampled from {self.agent.total_search_states} total search states)\n"
-                else:
-                    debug_info = f"=== SOLUTION STEP {self.current_frame + 1} ===\n"
-                
+            """Get formatted debug information from the cache."""
+            # FIXED: Use cached debug info instead of generating it dynamically
+            if 0 <= self.current_frame < len(self.debug_info_cache):
+                return self.debug_info_cache[self.current_frame]
             else:
-                if not self.agent.current_node:
-                    return "No current node"
-                state = self.agent.current_node.state
-                debug_info = f"=== SEARCH STEP {self.current_frame + 1} ===\n"
-                debug_info += f"Node Depth: {self.agent.current_node.depth}\n"
-            
-            debug_info += f"Filled Regions: {sorted(state.filled_regions)}\n\n"
-            
-            debug_info += f"=== ADJACENCY GRAPH ===\n"
-            for region, neighbors in sorted(state.adjacency_graph.items()):
-                debug_info += f"Region {region}: {sorted(neighbors)}\n"
-            
-            debug_info += f"\n=== REMAINING REGIONS ===\n"
-            unfilled_regions = set(state.adjacency_graph.keys()) - state.filled_regions
-            for region in sorted(unfilled_regions):
-                try:
-                    actions = state.get_actions(region)
-                    debug_info += f"Region {region}: {len(actions)} possible actions\n"
-                except:
-                    debug_info += f"Region {region}: Error getting actions\n"
-            
-            debug_info += f"\n=== BOARD STATE ===\n"
-            debug_info += str(state.board)
-            
-            return debug_info
+                return "Debug information not available for this frame"
 
         def cleanup(self):
             """Clean up temporary files."""
@@ -1241,6 +1308,7 @@ def main():
     parser.add_argument("--every-step", action="store_true", help="Capture every step instead of sampling (slower but complete)")
     parser.add_argument("--frames", type=int, help="Number of frames to sample from search process (default: show solution path only)")
     parser.add_argument("--cell-size", type=int, default=80, help="Cell size in pixels (default: 80)")
+    parser.add_argument("--show-region-numbers", action="store_true", help="Show region numbers on the board")
     args = parser.parse_args()
 
     # Setup
@@ -1285,32 +1353,30 @@ def main():
             run_realtime_visualizer(problem, original_board_data, args.cell_size, key_frames_only, max_frames)
         
     elif args.gif:
-        # Generate GIF
-        solve_and_save_gif(problem, original_board_data, test_name, images_dir, args.cell_size, key_frames_only, max_frames)
+        # Generate GIF (now using PNG frames)
+        solve_and_save_gif(problem, original_board_data, test_name, images_dir, args.cell_size, key_frames_only=False, max_frames=None, show_region_numbers=args.show_region_numbers)
         
     elif args.svg:
-        # Generate SVG sequence
+        # Generate SVG sequence (unchanged)
         solve_and_save_svg_sequence(problem, original_board_data, test_name, images_dir, args.cell_size, key_frames_only, max_frames)
         
     else:
-        # Static mode
+        # Static mode: output PNG using board_to_image
         if args.output_file:
             solution_board = parse_solution_board(args.output_file)
-            svg_content = board_to_svg(solution_board.board, problem.current_state.adjacency_graph, 
-                                     original_board_data, args.cell_size)
-            svg_path = os.path.join(images_dir, f"{test_name}_solved.svg")
-            with open(svg_path, 'w', encoding='utf-8') as f:
-                f.write(svg_content)
-            print(f"Solution SVG saved to {svg_path}")
+            image = board_to_image(solution_board.board, problem.current_state.adjacency_graph, 
+                                   original_board_data, args.cell_size, show_region_numbers=args.show_region_numbers)
+            png_path = os.path.join(images_dir, f"{test_name}_solved.png")
+            image.save(png_path)
+            print(f"Solution PNG saved to {png_path}")
         else:
             goal_node = depth_first_tree_search(problem)
             if goal_node:
-                svg_content = board_to_svg(goal_node.state.board.board, goal_node.state.adjacency_graph, 
-                                         original_board_data, args.cell_size)
-                svg_path = os.path.join(images_dir, f"{test_name}_solved.svg")
-                with open(svg_path, 'w', encoding='utf-8') as f:
-                    f.write(svg_content)
-                print(f"Solution SVG saved to {svg_path}")
+                image = board_to_image(goal_node.state.board.board, goal_node.state.adjacency_graph, 
+                                       original_board_data, args.cell_size, show_region_numbers=args.show_region_numbers)
+                png_path = os.path.join(images_dir, f"{test_name}_solved.png")
+                image.save(png_path)
+                print(f"Solution PNG saved to {png_path}")
                 print("Solution found!")
             else:
                 print("No solution found.")
